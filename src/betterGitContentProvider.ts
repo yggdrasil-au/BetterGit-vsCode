@@ -1,0 +1,39 @@
+import * as vscode from 'vscode';
+import * as cp from 'child_process';
+import * as path from 'path';
+
+export class BetterGitContentProvider implements vscode.TextDocumentContentProvider {
+    // Scheme: bettergit://sha/path/to/file
+    
+    constructor(private extensionPath: string, private workspaceRoot: string | undefined) {}
+
+    provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+        return new Promise(resolve => {
+            // Authority is the SHA (or HEAD)
+            const sha = uri.authority;
+            // Path is the relative path (remove leading slash)
+            const relPath = uri.path.substring(1);
+
+            if (!this.workspaceRoot) {
+                resolve("");
+                return;
+            }
+
+            const config = vscode.workspace.getConfiguration('bettergit');
+            let exePath = config.get<string>('executablePath');
+
+            if (!exePath) {
+                resolve("Error: BetterGit executable path not configured.");
+                return;
+            }
+            
+            cp.exec(`"${exePath}" cat-file ${sha} "${relPath}"`, { cwd: this.workspaceRoot }, (err, stdout) => {
+                if (err) {
+                    resolve(""); // Return empty if error (e.g. new file)
+                } else {
+                    resolve(stdout);
+                }
+            });
+        });
+    }
+}
