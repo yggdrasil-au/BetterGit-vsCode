@@ -1,119 +1,144 @@
 {
-    "name": "bettergitvscode",
-    "displayName": "BetterGitVSCode",
-    "description": "Simplified, non-destructive version control.",
-    "version": "0.0.9",
-    "engines": {
-        "vscode": "^1.106.1"
-    },
-    "publisher": "yggdrasil-au",
-    "main": "./out/extension.js",
-    "repository": {},
-    "scripts": {
-        "production": "pnpm run build && pnpm run package && pnpm run uninstall-extension && pnpm run install-extension",
-        "publish-public": "vsce publish --pat ${PAT} --pre-release",
-        "build": "tsc -p ./",
-        "package": "pnpm version patch --no-git-tag-version && vsce package --pre-release -o ./build/",
-        "uninstall-extension": "code --uninstall-extension yggdrasil-au.bettergitvscode",
-        "install-extension": "node -e \"require('child_process').execSync('code --install-extension ./build/bettergitvscode-' + require('./package.json').version + '.vsix', {stdio: 'inherit'})\""
-    },
-    "contributes": {
-        "configuration": {
-            "title": "BetterGit",
-            "properties": {
-                "bettergit.executablePath": {
-                    "type": "string",
-                    "default": "",
-                    "markdownDescription": "Path to the BetterGit executable (`BetterGit.exe`).\n\nAlternatively, you can edit this in [settings.json](command:workbench.action.openSettingsJson)."
-                }
-            }
-        },
-        "viewsContainers": {
-            "activitybar": [
-                {
-                    "id": "BetterSourceControlContainer",
-                    "title": "Better Source Control",
-                    "icon": "resources/shield-icon.svg"
-                }
-            ]
-        },
-        "views": {
-            "BetterSourceControlContainer": [
-                {
-                    "id": "BetterSourceControlView",
-                    "name": "Project Status",
-                    "icon": "resources/shield-icon.svg"
-                }
-            ]
-        },
-        "commands": [
-            {
-                "command": "bettersourcecontrol.save",
-                "title": "Save",
-                "icon": "$(save)"
-            },
-            {
-                "command": "bettersourcecontrol.undo",
-                "title": "Undo",
-                "icon": "$(discard)"
-            },
-            {
-                "command": "bettersourcecontrol.redo",
-                "title": "Redo",
-                "icon": "$(redo)"
-            },
-            {
-                "command": "bettersourcecontrol.refresh",
-                "title": "Refresh",
-                "icon": "$(refresh)"
-            },
-            {
-                "command": "bettersourcecontrol.init",
-                "title": "Initialize Repository",
-                "icon": "$(repo)"
-            },
-            {
-                "command": "bettersourcecontrol.initNode",
-                "title": "Initialize Node Repository",
-                "icon": "$(repo)"
-            },
-            {
-                "command": "bettersourcecontrol.restore",
-                "title": "Restore This Version",
-                "icon": "$(reply)"
-            },
-            {
-                "command": "bettersourcecontrol.publish",
-                "title": "Publish (Push)",
-                "icon": "$(cloud-upload)"
-            }
-        ],
-        "menus": {
-            "view/title": [
-                {
-                    "command": "bettersourcecontrol.refresh",
-                    "when": "view == BetterSourceControlView",
-                    "group": "navigation"
-                }
-            ],
-            "view/item/context": [
-                {
-                    "command": "bettersourcecontrol.restore",
-                    "when": "view == BetterSourceControlView && viewItem == archive-item",
-                    "group": "inline"
-                },
-                {
-                    "command": "bettersourcecontrol.restore",
-                    "when": "view == BetterSourceControlView && viewItem == commit",
-                    "group": "inline"
-                }
-            ]
+  "name": "bettergitvscode",
+  "displayName": "BetterGitVSCode",
+  "description": "Simplified, non-destructive version control.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.106.1"
+  },
+  "publisher": "yggdrasil-au",
+  "main": "./out/extension.js",
+  "repository": {},
+  "scripts": {
+    "production": "pnpm run build && pnpm run package && pnpm run uninstall-extension && pnpm run install-extension",
+    "publish-public": "vsce publish --pat ${PAT} --pre-release",
+    "build": "tsc -p ./",
+    "package": "pnpm version patch --no-git-tag-version && vsce package --pre-release -o ./build/",
+    "uninstall-extension": "code --uninstall-extension yggdrasil-au.bettergitvscode",
+    "install-extension": "node -e \"require('child_process').execSync('code --install-extension ./build/bettergitvscode-' + require('./package.json').version + '.vsix', {stdio: 'inherit'})\""
+  },
+  "contributes": {
+    "configuration": {
+      "title": "BetterGit",
+      "properties": {
+        "bettergit.executablePath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the BetterGit executable (`BetterGit.exe`).\n\nAlternatively, you can edit this in [settings.json](command:workbench.action.openSettingsJson)."
         }
+      }
     },
-    "devDependencies": {
-        "@types/node": "^24.10.1",
-        "@types/vscode": "^1.106.1",
-        "@vscode/vsce": "^3.7.1",
-        "typescript": "^5.9.3"
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "BetterSourceControlContainer",
+          "title": "Better Source Control",
+          "icon": "resources/shield-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "BetterSourceControlContainer": [
+        {
+          "id": "BetterSourceControlView",
+          "name": "Project Status",
+          "icon": "resources/shield-icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "bettersourcecontrol.save",
+        "title": "Save",
+        "icon": "$(save)"
+      },
+      {
+        "command": "bettersourcecontrol.undo",
+        "title": "Undo",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "bettersourcecontrol.redo",
+        "title": "Redo",
+        "icon": "$(redo)"
+      },
+      {
+        "command": "bettersourcecontrol.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "bettersourcecontrol.init",
+        "title": "Initialize Repository",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "bettersourcecontrol.initNode",
+        "title": "Initialize Node Repository",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "bettersourcecontrol.restore",
+        "title": "Restore This Version",
+        "icon": "$(reply)"
+      },
+      {
+        "command": "bettersourcecontrol.publish",
+        "title": "Publish (Push)",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "bettersourcecontrol.merge",
+        "title": "Merge into Current",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "bettersourcecontrol.setChannel",
+        "title": "Set Release Channel",
+        "icon": "$(beaker)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "bettersourcecontrol.refresh",
+          "when": "view == BetterSourceControlView",
+          "group": "navigation"
+        },
+        {
+          "command": "bettersourcecontrol.setChannel",
+          "when": "view == BetterSourceControlView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "bettersourcecontrol.restore",
+          "when": "view == BetterSourceControlView && viewItem == archive-item",
+          "group": "inline"
+        },
+        {
+          "command": "bettersourcecontrol.restore",
+          "when": "view == BetterSourceControlView && viewItem == commit",
+          "group": "inline"
+        },
+        {
+          "command": "bettersourcecontrol.merge",
+          "when": "view == BetterSourceControlView && viewItem == archive-item",
+          "group": "inline"
+        },
+        {
+          "command": "bettersourcecontrol.merge",
+          "when": "view == BetterSourceControlView && viewItem == commit",
+          "group": "inline"
+        }
+      ]
     }
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/vscode": "^1.106.1",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.9.3"
+  }
 }

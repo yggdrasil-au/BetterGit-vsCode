@@ -15,6 +15,11 @@ export function activate(context: vscode.ExtensionContext) {
     // 2. Register the Tree View
     vscode.window.registerTreeDataProvider('BetterSourceControlView', betterGitProvider);
 
+    // 2b. Register Select Repo Command
+    vscode.commands.registerCommand('bettersourcecontrol.selectRepo', (path: string) => {
+        betterGitProvider.selectRepo(path);
+    });
+
     // 3. Register Content Provider for Diffs
     const contentProvider = new BetterGitContentProvider(context.extensionPath, rootPath);
     vscode.workspace.registerTextDocumentContentProvider('bettergit', contentProvider);
@@ -22,7 +27,7 @@ export function activate(context: vscode.ExtensionContext) {
     // 4. Register "Save" Command
     vscode.commands.registerCommand('bettersourcecontrol.save', async () => {
         const message = await vscode.window.showInputBox({ placeHolder: 'What did you change?' });
-        if (message) {
+        if (message !== undefined) {
             const versionType = await vscode.window.showQuickPick(
                 [
                     { label: 'Patch (Default)', description: '0.0.X -> 0.0.X+1', type: '' },
@@ -33,7 +38,8 @@ export function activate(context: vscode.ExtensionContext) {
             );
 
             const flag = versionType ? versionType.type : '';
-            runBetterGitCommand('save', `"${message}" ${flag}`, rootPath, context.extensionPath, betterGitProvider);
+            const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+            runBetterGitCommand('save', `"${message}" ${flag}`, targetPath, context.extensionPath, betterGitProvider);
         }
     });
 
@@ -42,14 +48,16 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage('Undo changes?', 'Yes', 'No')
             .then(selection => {
                 if (selection === 'Yes') {
-                    runBetterGitCommand('undo', '', rootPath, context.extensionPath, betterGitProvider);
+                    const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+                    runBetterGitCommand('undo', '', targetPath, context.extensionPath, betterGitProvider);
                 }
             });
     });
 
     // 5b. Register "Redo" Command
     vscode.commands.registerCommand('bettersourcecontrol.redo', () => {
-        runBetterGitCommand('redo', '', rootPath, context.extensionPath, betterGitProvider);
+        const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+        runBetterGitCommand('redo', '', targetPath, context.extensionPath, betterGitProvider);
     });
 
     // 6. Register "Refresh" (Manual Trigger)
@@ -59,8 +67,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('bettersourcecontrol.openDiff', (file: string) => {
         if (!rootPath) return;
         
-        const leftUri = vscode.Uri.parse(`bettergit://HEAD/${file}`);
-        const rightUri = vscode.Uri.file(path.join(rootPath, file));
+        // We need to know which repo this file belongs to.
+        // For now, we assume it's relative to the selected repo or root.
+        // But the file path coming from the tree view is relative to the repo root.
+        const repoPath = betterGitProvider.selectedRepoPath || rootPath;
+        
+        const leftUri = vscode.Uri.parse(`bettergit://HEAD/${file}?repo=${encodeURIComponent(repoPath)}`);
+        const rightUri = vscode.Uri.file(path.join(repoPath, file));
         const title = `${file} (HEAD) ↔ (Current)`;
         
         vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
@@ -71,7 +84,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Publishing to all remotes...', 'Cancel')
             .then(selection => {
                 if (selection !== 'Cancel') {
-                    runBetterGitCommand('publish', '', rootPath, context.extensionPath, betterGitProvider);
+                    const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+                    runBetterGitCommand('publish', '', targetPath, context.extensionPath, betterGitProvider);
                 }
             });
     });
@@ -80,6 +94,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('bettersourcecontrol.init', () => {
         // If we have an open folder, init there. Otherwise ask user to pick one.
         if (rootPath) {
+            // Init always targets the root or selected? Usually root.
+            // But if we selected a subfolder that isn't a repo yet?
+            // Let's stick to rootPath for init unless user picks otherwise.
             runBetterGitCommand('init', `"${rootPath}"`, rootPath, context.extensionPath, betterGitProvider);
         } else {
              vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false })
@@ -113,9 +130,36 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage(`Restore version ${item.label}? Current changes will be swapped to an archive.`, 'Yes', 'No')
             .then(selection => {
                 if (selection === 'Yes') {
-                     runBetterGitCommand('restore', item.sha, rootPath, context.extensionPath, betterGitProvider);
+                     const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+                     runBetterGitCommand('restore', item.sha, targetPath, context.extensionPath, betterGitProvider);
                 }
             });
+    });
+
+    // --- NEW: MERGE ---
+    vscode.commands.registerCommand('bettersourcecontrol.merge', (item: BetterGitItem) => {
+        if (!item || !item.sha) return;
+
+        vscode.window.showWarningMessage(`Merge ${item.label} into current state?`, 'Yes', 'No')
+            .then(selection => {
+                if (selection === 'Yes') {
+                     const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+                     runBetterGitCommand('merge', item.sha, targetPath, context.extensionPath, betterGitProvider);
+                }
+            });
+    });
+
+    // --- NEW: SET CHANNEL ---
+    vscode.commands.registerCommand('bettersourcecontrol.setChannel', async () => {
+        const channel = await vscode.window.showQuickPick(
+            ['Stable', 'Alpha', 'Beta'],
+            { placeHolder: 'Select Release Channel' }
+        );
+
+        if (channel) {
+            const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+            runBetterGitCommand('set-channel', channel, targetPath, context.extensionPath, betterGitProvider);
+        }
     });
 }
 

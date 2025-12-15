@@ -19,6 +19,15 @@ export class BetterGitContentProvider implements vscode.TextDocumentContentProvi
                 return;
             }
 
+            // Parse query for repo path
+            let repoPath = this.workspaceRoot;
+            if (uri.query) {
+                const match = uri.query.match(/repo=([^&]+)/);
+                if (match) {
+                    repoPath = decodeURIComponent(match[1]);
+                }
+            }
+
             const config = vscode.workspace.getConfiguration('bettergit');
             let exePath = config.get<string>('executablePath');
 
@@ -27,7 +36,7 @@ export class BetterGitContentProvider implements vscode.TextDocumentContentProvi
                 return;
             }
             
-            cp.exec(`"${exePath}" cat-file ${sha} "${relPath}"`, { cwd: this.workspaceRoot }, (err, stdout) => {
+            cp.exec(`"${exePath}" cat-file ${sha} "${relPath}"`, { cwd: repoPath }, (err, stdout) => {
                 if (err) {
                     resolve(""); // Return empty if error (e.g. new file)
                 } else {
