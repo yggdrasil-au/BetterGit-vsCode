@@ -64,7 +64,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('bettersourcecontrol.refresh', () => betterGitProvider.refresh());
 
     // 7. Register "Open Diff" Command
-    vscode.commands.registerCommand('bettersourcecontrol.openDiff', (file: string) => {
+    vscode.commands.registerCommand('bettersourcecontrol.openDiff', (file: string, status: string) => {
         if (!rootPath) return;
         
         // We need to know which repo this file belongs to.
@@ -72,8 +72,17 @@ export function activate(context: vscode.ExtensionContext) {
         // But the file path coming from the tree view is relative to the repo root.
         const repoPath = betterGitProvider.selectedRepoPath || rootPath;
         
-        const leftUri = vscode.Uri.parse(`bettergit://HEAD/${file}?repo=${encodeURIComponent(repoPath)}`);
-        const rightUri = vscode.Uri.file(path.join(repoPath, file));
+        let leftUri = vscode.Uri.parse(`bettergit://HEAD/${file}?repo=${encodeURIComponent(repoPath)}`);
+        let rightUri = vscode.Uri.file(path.join(repoPath, file));
+
+        if (status) {
+            if (status.includes('Deleted')) {
+                rightUri = vscode.Uri.parse(`bettergit://EMPTY/${file}?repo=${encodeURIComponent(repoPath)}`);
+            } else if (status.includes('New')) {
+                leftUri = vscode.Uri.parse(`bettergit://EMPTY/${file}?repo=${encodeURIComponent(repoPath)}`);
+            }
+        }
+
         const title = `${file} (HEAD) ↔ (Current)`;
         
         vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);

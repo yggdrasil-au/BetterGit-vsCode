@@ -103,7 +103,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         if (element.contextValue === 'group-submodules') {
             return Promise.resolve(this.repoData.submodules.map((r: any) => {
                 const item = new BetterGitItem(r.name, vscode.TreeItemCollapsibleState.None, 'repo-item', '');
-                item.description = r.path;
+                // item.description = r.path; // Removed as requested
                 const absPath = path.join(this.workspaceRoot!, r.path);
                 item.command = { command: 'bettersourcecontrol.selectRepo', title: 'Select', arguments: [absPath] };
                 if (this.selectedRepoPath === absPath) item.iconPath = new vscode.ThemeIcon('check');
@@ -210,15 +210,28 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 items.push(publishItem);
             }
             else if (section === 'section-changes') {
-                data.changes.forEach((file: string) => {
-                    const item = new BetterGitItem(file, vscode.TreeItemCollapsibleState.None, 'file', '');
+                data.changes.forEach((change: any) => {
+                    const file = change.path;
+                    const status = change.status;
+
+                    const uri = vscode.Uri.file(path.join(this.selectedRepoPath!, file));
+                    
+                    const label = path.basename(file);
+                    const item = new BetterGitItem(label, vscode.TreeItemCollapsibleState.None, 'file', '', uri);
+                    
+                    const dirname = path.dirname(file);
+                    if (dirname && dirname !== '.') {
+                        item.description = `${dirname} • ${status}`;
+                    } else {
+                        item.description = status;
+                    }
 
                     // NEW: Add click command to open the file
                     if (this.workspaceRoot) {
                         item.command = {
                             command: 'bettersourcecontrol.openDiff',
                             title: 'Open Diff',
-                            arguments: [file]
+                            arguments: [file, status]
                         };
                     }
                     items.push(item);
@@ -248,18 +261,25 @@ export class BetterGitItem extends vscode.TreeItem {
         public readonly label: string,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
         public readonly contextValue: string, // Used to identify what type of item this is
-        public readonly sha: string
+        public readonly sha: string,
+        public readonly resourceUri?: vscode.Uri
     ) {
         super(label, collapsibleState);
 
+        if (resourceUri) {
+            this.resourceUri = resourceUri;
+        }
+
         // Add icons based on type
-        if (contextValue === 'file') this.iconPath = new vscode.ThemeIcon('file');
+        // If it's a file and we have a resourceUri, let VS Code handle the icon (ThemeIcon.File is default behavior for resourceUri)
+        if (contextValue === 'file' && !resourceUri) this.iconPath = new vscode.ThemeIcon('file');
         if (contextValue === 'commit') this.iconPath = new vscode.ThemeIcon('git-commit');
         if (contextValue === 'archive-item') this.iconPath = new vscode.ThemeIcon('history');
         if (contextValue === 'settings') this.iconPath = new vscode.ThemeIcon('settings-gear');
         if (contextValue === 'info') this.iconPath = new vscode.ThemeIcon('info');
         if (contextValue === 'error') this.iconPath = new vscode.ThemeIcon('error');
         if (contextValue === 'action') this.iconPath = new vscode.ThemeIcon('play');
+        if (contextValue === 'repo-item') this.iconPath = new vscode.ThemeIcon('repo');
 
         this.tooltip = sha ? `ID: ${sha}` : label;
     }

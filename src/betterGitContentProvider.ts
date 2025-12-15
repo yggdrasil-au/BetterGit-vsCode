@@ -11,6 +11,12 @@ export class BetterGitContentProvider implements vscode.TextDocumentContentProvi
         return new Promise(resolve => {
             // Authority is the SHA (or HEAD)
             const sha = uri.authority;
+
+            if (sha === 'EMPTY') {
+                resolve("");
+                return;
+            }
+
             // Path is the relative path (remove leading slash)
             const relPath = uri.path.substring(1);
 
