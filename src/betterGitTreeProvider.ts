@@ -181,7 +181,11 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
             // Pass --path to get-tree-data
             outputChannel.appendLine(`[INFO] Loading tree data from ${repoPath}`);
 
-            cp.exec(`"${exePath}" get-tree-data --path "${repoPath}"`, { cwd: repoPath }, (err, stdout, stderr) => {
+            // FIX: Add maxBuffer (e.g., 10MB) to handle large JSON outputs
+            cp.exec(`"${exePath}" get-tree-data --path "${repoPath}"`, { 
+                cwd: repoPath,
+                maxBuffer: 1024 * 1024 * 10 // 10 MB
+            }, (err, stdout, stderr) => {
                 if (err) {
                     outputChannel.appendLine(`[ERROR] Failed to load tree data: ${err.message}`);
                     if (stderr) {
