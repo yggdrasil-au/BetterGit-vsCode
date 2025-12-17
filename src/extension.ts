@@ -4,7 +4,11 @@ import * as path from 'path';
 import { BetterGitTreeProvider, BetterGitItem } from './betterGitTreeProvider';
 import { BetterGitContentProvider } from './betterGitContentProvider';
 
+// Create a global output channel for BetterGit logging
+export const outputChannel = vscode.window.createOutputChannel('BetterGit');
+
 export function activate(context: vscode.ExtensionContext) {
+    outputChannel.appendLine('[BetterGit] Extension activated');
 
     const rootPath = (vscode.workspace.workspaceFolders && (vscode.workspace.workspaceFolders.length > 0))
         ? vscode.workspace.workspaceFolders[0].uri.fsPath : undefined;
@@ -66,12 +70,12 @@ export function activate(context: vscode.ExtensionContext) {
     // 7. Register "Open Diff" Command
     vscode.commands.registerCommand('bettersourcecontrol.openDiff', (file: string, status: string) => {
         if (!rootPath) return;
-        
+
         // We need to know which repo this file belongs to.
         // For now, we assume it's relative to the selected repo or root.
         // But the file path coming from the tree view is relative to the repo root.
         const repoPath = betterGitProvider.selectedRepoPath || rootPath;
-        
+
         let leftUri = vscode.Uri.parse(`bettergit://HEAD/${file}?repo=${encodeURIComponent(repoPath)}`);
         let rightUri = vscode.Uri.file(path.join(repoPath, file));
 
@@ -84,7 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const title = `${file} (HEAD) ↔ (Current)`;
-        
+
         vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
     });
 
@@ -108,7 +112,7 @@ export function activate(context: vscode.ExtensionContext) {
             // Let's stick to rootPath for init unless user picks otherwise.
             runBetterGitCommand('init', `"${rootPath}"`, rootPath, context.extensionPath, betterGitProvider);
         } else {
-             vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false })
+                vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false })
                 .then(folders => {
                     if (folders && folders[0]) {
                         runBetterGitCommand('init', `"${folders[0].fsPath}"`, folders[0].fsPath, context.extensionPath, betterGitProvider);
@@ -122,7 +126,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (rootPath) {
             runBetterGitCommand('init', `"${rootPath}" --node`, rootPath, context.extensionPath, betterGitProvider);
         } else {
-             vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false })
+                vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false })
                 .then(folders => {
                     if (folders && folders[0]) {
                         runBetterGitCommand('init', `"${folders[0].fsPath}" --node`, folders[0].fsPath, context.extensionPath, betterGitProvider);
@@ -139,8 +143,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage(`Restore version ${item.label}? Current changes will be swapped to an archive.`, 'Yes', 'No')
             .then(selection => {
                 if (selection === 'Yes') {
-                     const targetPath = betterGitProvider.selectedRepoPath || rootPath;
-                     runBetterGitCommand('restore', item.sha, targetPath, context.extensionPath, betterGitProvider);
+                    const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+                    runBetterGitCommand('restore', item.sha, targetPath, context.extensionPath, betterGitProvider);
                 }
             });
     });
@@ -152,8 +156,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage(`Merge ${item.label} into current state?`, 'Yes', 'No')
             .then(selection => {
                 if (selection === 'Yes') {
-                     const targetPath = betterGitProvider.selectedRepoPath || rootPath;
-                     runBetterGitCommand('merge', item.sha, targetPath, context.extensionPath, betterGitProvider);
+                    const targetPath = betterGitProvider.selectedRepoPath || rootPath;
+                    runBetterGitCommand('merge', item.sha, targetPath, context.extensionPath, betterGitProvider);
                 }
             });
     });
@@ -176,25 +180,34 @@ export function activate(context: vscode.ExtensionContext) {
 function runBetterGitCommand(command: string, args: string, cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider) {
     if (!cwd) {
         // If running init from a blank window, we might not have a CWD, so we don't pass one to exec
-        if (command !== 'init') return; 
+        if (command !== 'init') return;
     }
 
     const config = vscode.workspace.getConfiguration('bettergit');
     let exePath = config.get<string>('executablePath');
 
     if (!exePath) {
+        outputChannel.appendLine(`[ERROR] BetterGit executable path is not configured. Please set "bettergit.executablePath" in settings.`);
         vscode.window.showErrorMessage('BetterGit executable path is not configured. Please set "bettergit.executablePath" in settings.');
         return;
     }
+
+    // Log the command being executed
+    outputChannel.appendLine(`[${new Date().toISOString()}] Running: ${command} ${args}${cwd ? ` (in ${cwd})` : ''}`);
 
     // Fix: Ensure we don't double quote if args already has quotes, but here args is constructed by us.
     // The command string needs to be carefully constructed.
     cp.exec(`"${exePath}" ${command} ${args}`, { cwd: cwd }, (err, stdout, stderr) => {
         if (err) {
+            outputChannel.appendLine(`[ERROR] ${stderr}`);
             vscode.window.showErrorMessage('BetterGit Error: ' + stderr);
         } else {
-            if (stdout) vscode.window.showInformationMessage(stdout);
+            if (stdout) {
+                outputChannel.appendLine(`[OUTPUT] ${stdout}`);
+                vscode.window.showInformationMessage(stdout);
+            }
             provider.refresh(); // Update the tree view after action
         }
+
     });
 }

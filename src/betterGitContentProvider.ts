@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
+import { outputChannel } from './extension';
 
 export class BetterGitContentProvider implements vscode.TextDocumentContentProvider {
     // Scheme: bettergit://sha/path/to/file
-    
+
     constructor(private extensionPath: string, private workspaceRoot: string | undefined) {}
 
     provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
@@ -41,11 +42,14 @@ export class BetterGitContentProvider implements vscode.TextDocumentContentProvi
                 resolve("Error: BetterGit executable path not configured.");
                 return;
             }
-            
+
+            outputChannel.appendLine(`[INFO] Loading file content: ${relPath} from ${sha}`);
             cp.exec(`"${exePath}" cat-file ${sha} "${relPath}"`, { cwd: repoPath }, (err, stdout) => {
                 if (err) {
+                    outputChannel.appendLine(`[INFO] File not found in ${sha}: ${relPath} (new file)`);
                     resolve(""); // Return empty if error (e.g. new file)
                 } else {
+                    outputChannel.appendLine(`[INFO] File content loaded: ${relPath}`);
                     resolve(stdout);
                 }
             });
