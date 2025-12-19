@@ -14,6 +14,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     private treeDataErrorCache: Map<string, string> = new Map();
     private otherModulesCache: BetterGitItem[] | null = null;
     private repoItemCache: Map<string, BetterGitItem> = new Map();
+    private sectionItemCache: Map<string, BetterGitItem> = new Map();
     private submoduleRelPathsByRepo: Map<string, Set<string>> = new Map();
 
     constructor(private workspaceRoot: string | undefined, private extensionPath: string) {
@@ -24,13 +25,18 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         this.treeDataCache.clear();
         this.treeDataErrorCache.clear();
         this.otherModulesCache = null;
-        this.repoItemCache.clear();
+        // Keep item caches so the TreeView doesn't collapse and reveal() stays reliable.
+        // They will be updated in-place as new scan/tree data arrives.
         this.submoduleRelPathsByRepo.clear();
         this._onDidChangeTreeData.fire();
     }
 
     public getRepoItemByRepoPath(repoPath: string): BetterGitItem | undefined {
         return this.repoItemCache.get(this.normalizeAbsPath(repoPath));
+    }
+
+    public getSectionItem(repoPath: string, sectionContextValue: string): BetterGitItem | undefined {
+        return this.sectionItemCache.get(this.sectionKey(repoPath, sectionContextValue));
     }
 
     getTreeItem(element: BetterGitItem): vscode.TreeItem {
@@ -116,10 +122,10 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 items.push(...subItems);
 
                 if (repoPath) {
-                    items.push(new BetterGitItem('Manage Repo', vscode.TreeItemCollapsibleState.Expanded, 'section-manage', '', undefined, { repoPath }));
-                    items.push(new BetterGitItem('Changes', vscode.TreeItemCollapsibleState.Expanded, 'section-changes', '', undefined, { repoPath }));
-                    items.push(new BetterGitItem('Timeline', vscode.TreeItemCollapsibleState.Collapsed, 'section-timeline', '', undefined, { repoPath }));
-                    items.push(new BetterGitItem('Archives (Undone)', vscode.TreeItemCollapsibleState.Collapsed, 'section-archives', '', undefined, { repoPath }));
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-manage', 'Manage Repo', vscode.TreeItemCollapsibleState.Expanded));
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-changes', 'Changes', vscode.TreeItemCollapsibleState.Expanded));
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-timeline', 'Timeline', vscode.TreeItemCollapsibleState.Collapsed));
+                    items.push(this.getOrCreateSectionItem(repoPath, 'section-archives', 'Archives (Undone)', vscode.TreeItemCollapsibleState.Collapsed));
                 }
 
                 return items;
@@ -143,6 +149,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         // data.Path is relative to workspace root.
         const absPath = path.join(this.workspaceRoot!, data.Path);
 
+        const isPublishPending = !!data.__publishPending;
         const label = hasActiveChanges ? `* ${data.Name}` : data.Name;
 
         const key = this.normalizeAbsPath(absPath);
@@ -150,9 +157,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         if (existing) {
             existing.label = label;
             existing.description = data.Path;
-            existing.iconPath = hasActiveChanges
-                ? new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'))
-                : new vscode.ThemeIcon('repo');
+            existing.iconPath = this.getRepoIcon(hasActiveChanges, isPublishPending);
             existing.data = {
                 ...data,
                 repoPath: absPath
@@ -166,9 +171,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         });
 
         item.description = data.Path;
-        item.iconPath = hasActiveChanges
-            ? new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'))
-            : new vscode.ThemeIcon('repo');
+        item.iconPath = this.getRepoIcon(hasActiveChanges, isPublishPending);
 
         this.repoItemCache.set(key, item);
 
@@ -180,10 +183,46 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         try {
             const treeData = await this.getTreeData(absPath);
             const hasChanges = !!(treeData && treeData.isInitialized && Array.isArray(treeData.changes) && treeData.changes.length > 0);
-            return this.createRepoItem(data, hasChanges);
+            const publishPending = !!(treeData && treeData.isInitialized && treeData.publish && treeData.publish.isPublishPending);
+            return this.createRepoItem({ ...data, __publishPending: publishPending }, hasChanges);
         } catch {
             return this.createRepoItem(data, false);
         }
+    }
+
+    private getRepoIcon(hasActiveChanges: boolean, isPublishPending: boolean): vscode.ThemeIcon {
+        // If both apply, prefer the "changes" color, since it's more immediate.
+        if (hasActiveChanges) {
+            return new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
+        }
+        if (isPublishPending) {
+            // Distinct color indicating local commits ahead of upstream (needs push).
+            return new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.untrackedResourceForeground'));
+        }
+        return new vscode.ThemeIcon('repo');
+    }
+
+    private sectionKey(repoPath: string, sectionContextValue: string): string {
+        return `${this.normalizeAbsPath(repoPath)}|${sectionContextValue}`;
+    }
+
+    private getOrCreateSectionItem(
+        repoPath: string,
+        contextValue: string,
+        label: string,
+        collapsibleState: vscode.TreeItemCollapsibleState
+    ): BetterGitItem {
+        const key = this.sectionKey(repoPath, contextValue);
+        const existing = this.sectionItemCache.get(key);
+        if (existing) {
+            existing.label = label;
+            existing.data = { repoPath };
+            return existing;
+        }
+
+        const item = new BetterGitItem(label, collapsibleState, contextValue, '', undefined, { repoPath });
+        this.sectionItemCache.set(key, item);
+        return item;
     }
 
     private scanRepositories(): Promise<any> {

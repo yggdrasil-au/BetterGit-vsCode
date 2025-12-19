@@ -9,6 +9,13 @@ export const outputChannel = vscode.window.createOutputChannel('BetterGit');
 
 let betterGitTreeView: vscode.TreeView<BetterGitItem> | undefined;
 
+const expandedRepoPaths = new Set<string>();
+const expandedSectionKeys = new Set<string>();
+
+function normalizeAbsPath(p: string): string {
+    return path.normalize(p).toLowerCase();
+}
+
 export function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('[BetterGit] Extension activated');
 
@@ -23,6 +30,29 @@ export function activate(context: vscode.ExtensionContext) {
         treeDataProvider: betterGitProvider
     });
     context.subscriptions.push(betterGitTreeView);
+
+    // Track expanded/collapsed state so refresh doesn't collapse the view.
+    betterGitTreeView.onDidExpandElement(e => {
+        const el = e.element;
+        const repoPath = el?.data?.repoPath as string | undefined;
+        if (el.contextValue === 'repo-section' && repoPath) {
+            expandedRepoPaths.add(normalizeAbsPath(repoPath));
+        }
+        if (el.contextValue?.startsWith('section-') && repoPath) {
+            expandedSectionKeys.add(`${normalizeAbsPath(repoPath)}|${el.contextValue}`);
+        }
+    });
+
+    betterGitTreeView.onDidCollapseElement(e => {
+        const el = e.element;
+        const repoPath = el?.data?.repoPath as string | undefined;
+        if (el.contextValue === 'repo-section' && repoPath) {
+            expandedRepoPaths.delete(normalizeAbsPath(repoPath));
+        }
+        if (el.contextValue?.startsWith('section-') && repoPath) {
+            expandedSectionKeys.delete(`${normalizeAbsPath(repoPath)}|${el.contextValue}`);
+        }
+    });
 
     // 3. Register Content Provider for Diffs
     const contentProvider = new BetterGitContentProvider(context.extensionPath, rootPath);
@@ -244,7 +274,46 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
                 vscode.window.showInformationMessage(stdout);
             }
             provider.refresh(); // Update the tree view after action
+            restoreExpandedState(provider);
         }
 
     });
+}
+
+function restoreExpandedState(provider: BetterGitTreeProvider) {
+    if (!betterGitTreeView) return;
+
+    // Restore repo expansions first, then section expansions.
+    const repoPaths = Array.from(expandedRepoPaths);
+    const sectionKeys = Array.from(expandedSectionKeys);
+
+    // Defer slightly so the provider has a chance to re-scan and re-materialize nodes.
+    setTimeout(async () => {
+        for (const repoKey of repoPaths) {
+            // repoKey is normalized; provider expects the real absolute path. Try to find any cached item that matches.
+            const repoItem = provider.getRepoItemByRepoPath(repoKey) || provider.getRepoItemByRepoPath(repoKey.toUpperCase()) || provider.getRepoItemByRepoPath(repoKey.toLowerCase());
+            if (repoItem) {
+                try {
+                    await betterGitTreeView!.reveal(repoItem, { expand: 1, select: false, focus: false });
+                } catch {
+                    // ignore
+                }
+            }
+        }
+
+        for (const key of sectionKeys) {
+            const [repoKey, section] = key.split('|');
+            if (!repoKey || !section) continue;
+
+            // Best-effort: provider caches section items by repoPath+context.
+            const sectionItem = provider.getSectionItem(repoKey, section);
+            if (sectionItem) {
+                try {
+                    await betterGitTreeView!.reveal(sectionItem, { expand: 1, select: false, focus: false });
+                } catch {
+                    // ignore
+                }
+            }
+        }
+    }, 75);
 }
