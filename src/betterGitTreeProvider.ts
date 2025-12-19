@@ -191,15 +191,27 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     }
 
     private getRepoIcon(hasActiveChanges: boolean, isPublishPending: boolean): vscode.ThemeIcon {
-        // If both apply, prefer the "changes" color, since it's more immediate.
+        // Rules:
+        // - changes only => normal modified color
+        // - publish pending only => purple
+        // - both => pink
+        if (hasActiveChanges && isPublishPending) {
+            return new vscode.ThemeIcon('repo', new vscode.ThemeColor('terminal.ansiBrightMagenta'));
+        }
         if (hasActiveChanges) {
             return new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
         }
         if (isPublishPending) {
-            // Distinct color indicating local commits ahead of upstream (needs push).
-            return new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.untrackedResourceForeground'));
+            return new vscode.ThemeIcon('repo', new vscode.ThemeColor('terminal.ansiMagenta'));
         }
         return new vscode.ThemeIcon('repo');
+    }
+
+    private getPublishTintColor(hasActiveChanges: boolean, isPublishPending: boolean): vscode.ThemeColor | undefined {
+        if (!isPublishPending) return undefined;
+        return hasActiveChanges
+            ? new vscode.ThemeColor('terminal.ansiBrightMagenta')
+            : new vscode.ThemeColor('terminal.ansiMagenta');
     }
 
     private sectionKey(repoPath: string, sectionContextValue: string): string {
@@ -387,18 +399,26 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 } else {
                     const saveItem = new BetterGitItem("Save Changes", vscode.TreeItemCollapsibleState.None, 'action', '');
                     saveItem.command = { command: 'bettersourcecontrol.save', title: 'Save', arguments: [repoPath] };
+                    // standard floppy disk icon, always orange colour to indicate unsaved changes
+                    saveItem.iconPath = new vscode.ThemeIcon('save', new vscode.ThemeColor('charts.orange'));
                     items.push(saveItem);
 
                     const undoItem = new BetterGitItem("Undo Last Save", vscode.TreeItemCollapsibleState.None, 'action', '');
                     undoItem.command = { command: 'bettersourcecontrol.undo', title: 'Undo', arguments: [repoPath] };
+                    // undo icon, no colour
+                    undoItem.iconPath = new vscode.ThemeIcon('arrow-left');
                     items.push(undoItem);
 
                     const redoItem = new BetterGitItem("Redo Last Undo", vscode.TreeItemCollapsibleState.None, 'action', '');
                     redoItem.command = { command: 'bettersourcecontrol.redo', title: 'Redo', arguments: [repoPath] };
+                    // redo icon, no colour
+                    redoItem.iconPath = new vscode.ThemeIcon('arrow-right');
                     items.push(redoItem);
 
                     const publishItem = new BetterGitItem("Publish (Push)", vscode.TreeItemCollapsibleState.None, 'action', '');
                     publishItem.command = { command: 'bettersourcecontrol.publish', title: 'Publish', arguments: [repoPath] };
+                    // cloud upload icon // always purple to match local-only commits color
+                    publishItem.iconPath = new vscode.ThemeIcon('cloud-upload', new vscode.ThemeColor('charts.purple'));
                     items.push(publishItem);
 
                     const channelItem = new BetterGitItem("Set Release Channel", vscode.TreeItemCollapsibleState.None, 'action', '');
@@ -453,8 +473,18 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     items.push(new BetterGitItem("Repository is not initialized", vscode.TreeItemCollapsibleState.None, 'info', ''));
                     return items;
                 }
-                data.timeline.forEach((commit: any) => {
-                    items.push(new BetterGitItem(`[${commit.version}] ${commit.message}`, vscode.TreeItemCollapsibleState.None, 'commit', commit.id, undefined, { repoPath }));
+                const aheadBy = typeof data.publish?.aheadBy === 'number' ? data.publish.aheadBy : 0;
+                data.timeline.forEach((commit: any, index: number) => {
+                    const item = new BetterGitItem(`[${commit.version}] ${commit.message}`, vscode.TreeItemCollapsibleState.None, 'commit', commit.id, undefined, { repoPath });
+
+                    // Highlight local-only commits (not yet pushed/published).
+                    if (aheadBy > 0 && index < aheadBy) {
+                        item.iconPath = new vscode.ThemeIcon('git-commit', new vscode.ThemeColor('charts.purple'));
+                        item.description = 'Local only (not published)';
+                        item.tooltip = `ID: ${commit.id}\nLocal only (not published)`;
+                    }
+
+                    items.push(item);
                 });
             }
             else if (section === 'section-archives') {
