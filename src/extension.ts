@@ -7,6 +7,8 @@ import { BetterGitContentProvider } from './betterGitContentProvider';
 // Create a global output channel for BetterGit logging
 export const outputChannel = vscode.window.createOutputChannel('BetterGit');
 
+let betterGitTreeView: vscode.TreeView<BetterGitItem> | undefined;
+
 export function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('[BetterGit] Extension activated');
 
@@ -16,8 +18,11 @@ export function activate(context: vscode.ExtensionContext) {
     // 1. Initialize the Tree Data Provider
     const betterGitProvider = new BetterGitTreeProvider(rootPath, context.extensionPath);
 
-    // 2. Register the Tree View
-    vscode.window.registerTreeDataProvider('BetterSourceControlView', betterGitProvider);
+    // 2. Create the Tree View (needed for reveal/expand)
+    betterGitTreeView = vscode.window.createTreeView('BetterSourceControlView', {
+        treeDataProvider: betterGitProvider
+    });
+    context.subscriptions.push(betterGitTreeView);
 
     // 3. Register Content Provider for Diffs
     const contentProvider = new BetterGitContentProvider(context.extensionPath, rootPath);
@@ -38,7 +43,8 @@ export function activate(context: vscode.ExtensionContext) {
 
             const flag = versionType ? versionType.type : '';
             const targetPath = repoPath || rootPath;
-            runBetterGitCommand('save', `"${message}" ${flag}`, targetPath, context.extensionPath, betterGitProvider);
+            const args = flag ? [message, flag] : [message];
+            runBetterGitCommand('save', args, targetPath, providerPath(context), betterGitProvider);
         }
     });
 
@@ -48,7 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
             .then(selection => {
                 if (selection === 'Yes') {
                     const targetPath = repoPath || rootPath;
-                    runBetterGitCommand('undo', '', targetPath, context.extensionPath, betterGitProvider);
+                    runBetterGitCommand('undo', [], targetPath, providerPath(context), betterGitProvider);
                 }
             });
     });
@@ -56,11 +62,34 @@ export function activate(context: vscode.ExtensionContext) {
     // 5b. Register "Redo" Command
     vscode.commands.registerCommand('bettersourcecontrol.redo', (repoPath?: string) => {
         const targetPath = repoPath || rootPath;
-        runBetterGitCommand('redo', '', targetPath, context.extensionPath, betterGitProvider);
+        runBetterGitCommand('redo', [], targetPath, providerPath(context), betterGitProvider);
     });
 
     // 6. Register "Refresh" (Manual Trigger)
     vscode.commands.registerCommand('bettersourcecontrol.refresh', () => betterGitProvider.refresh());
+
+    // 6b. Handle directory/submodule change clicks
+    vscode.commands.registerCommand('bettersourcecontrol.openDirectoryChange', async (targetAbsPath: string) => {
+        const config = vscode.workspace.getConfiguration('bettergit');
+        const openRepoNode = config.get<boolean>('submoduleChanges.openRepoNode', true);
+        const revealInExplorer = config.get<boolean>('submoduleChanges.revealInExplorer', false);
+
+        if (openRepoNode && betterGitTreeView) {
+            const repoItem = betterGitProvider.getRepoItemByRepoPath(targetAbsPath);
+            if (repoItem) {
+                await betterGitTreeView.reveal(repoItem, { expand: 2, focus: true, select: true });
+            } else {
+                // If we can't find the node (not scanned / not in tree), fall back to explorer if enabled.
+                if (!revealInExplorer) {
+                    vscode.window.showInformationMessage('Submodule repo node not found in BetterGit view.');
+                }
+            }
+        }
+
+        if (revealInExplorer) {
+            await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(targetAbsPath));
+        }
+    });
 
     // 7. Register "Open Diff" Command
     vscode.commands.registerCommand('bettersourcecontrol.openDiff', (file: string, status: string, repoPath?: string) => {
@@ -93,7 +122,7 @@ export function activate(context: vscode.ExtensionContext) {
             .then(selection => {
                 if (selection !== 'Cancel') {
                     const targetPath = repoPath || rootPath;
-                    runBetterGitCommand('publish', '', targetPath, context.extensionPath, betterGitProvider);
+                    runBetterGitCommand('publish', [], targetPath, providerPath(context), betterGitProvider);
                 }
             });
     });
@@ -102,19 +131,19 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('bettersourcecontrol.init', (repoPath?: string) => {
         // If invoked from a repo node, init that repo. Otherwise fall back to workspace root / open dialog.
         if (repoPath) {
-            runBetterGitCommand('init', `"${repoPath}"`, repoPath, context.extensionPath, betterGitProvider);
+            runBetterGitCommand('init', [repoPath], repoPath, providerPath(context), betterGitProvider);
             return;
         }
 
         if (rootPath) {
-            runBetterGitCommand('init', `"${rootPath}"`, rootPath, context.extensionPath, betterGitProvider);
+            runBetterGitCommand('init', [rootPath], rootPath, providerPath(context), betterGitProvider);
             return;
         }
 
         vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false })
             .then(folders => {
                 if (folders && folders[0]) {
-                    runBetterGitCommand('init', `"${folders[0].fsPath}"`, folders[0].fsPath, context.extensionPath, betterGitProvider);
+                    runBetterGitCommand('init', [folders[0].fsPath], folders[0].fsPath, providerPath(context), betterGitProvider);
                 }
             });
     });
@@ -122,19 +151,19 @@ export function activate(context: vscode.ExtensionContext) {
     // --- NEW: INIT NODE ---
     vscode.commands.registerCommand('bettersourcecontrol.initNode', (repoPath?: string) => {
         if (repoPath) {
-            runBetterGitCommand('init', `"${repoPath}" --node`, repoPath, context.extensionPath, betterGitProvider);
+            runBetterGitCommand('init', [repoPath, '--node'], repoPath, providerPath(context), betterGitProvider);
             return;
         }
 
         if (rootPath) {
-            runBetterGitCommand('init', `"${rootPath}" --node`, rootPath, context.extensionPath, betterGitProvider);
+            runBetterGitCommand('init', [rootPath, '--node'], rootPath, providerPath(context), betterGitProvider);
             return;
         }
 
         vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false })
             .then(folders => {
                 if (folders && folders[0]) {
-                    runBetterGitCommand('init', `"${folders[0].fsPath}" --node`, folders[0].fsPath, context.extensionPath, betterGitProvider);
+                    runBetterGitCommand('init', [folders[0].fsPath, '--node'], folders[0].fsPath, providerPath(context), betterGitProvider);
                 }
             });
     });
@@ -148,7 +177,7 @@ export function activate(context: vscode.ExtensionContext) {
             .then(selection => {
                 if (selection === 'Yes') {
                     const targetPath = item.data?.repoPath || rootPath;
-                    runBetterGitCommand('restore', item.sha, targetPath, context.extensionPath, betterGitProvider);
+                    runBetterGitCommand('restore', [item.sha], targetPath, providerPath(context), betterGitProvider);
                 }
             });
     });
@@ -161,7 +190,7 @@ export function activate(context: vscode.ExtensionContext) {
             .then(selection => {
                 if (selection === 'Yes') {
                     const targetPath = item.data?.repoPath || rootPath;
-                    runBetterGitCommand('merge', item.sha, targetPath, context.extensionPath, betterGitProvider);
+                    runBetterGitCommand('merge', [item.sha], targetPath, providerPath(context), betterGitProvider);
                 }
             });
     });
@@ -175,13 +204,17 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (channel) {
             const targetPath = repoPath || rootPath;
-            runBetterGitCommand('set-channel', channel, targetPath, context.extensionPath, betterGitProvider);
+            runBetterGitCommand('set-channel', [channel], targetPath, providerPath(context), betterGitProvider);
         }
     });
 }
 
+function providerPath(context: vscode.ExtensionContext): string {
+    return context.extensionPath;
+}
+
 // Helper to run your C# EXE
-function runBetterGitCommand(command: string, args: string, cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider) {
+function runBetterGitCommand(command: string, args: string[], cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider) {
     if (!cwd) {
         // If running init from a blank window, we might not have a CWD, so we don't pass one to exec
         if (command !== 'init') return;
@@ -197,11 +230,11 @@ function runBetterGitCommand(command: string, args: string, cwd: string | undefi
     }
 
     // Log the command being executed
-    outputChannel.appendLine(`[${new Date().toISOString()}] Running: ${command} ${args}${cwd ? ` (in ${cwd})` : ''}`);
+    outputChannel.appendLine(`[${new Date().toISOString()}] Running: ${command} ${args.join(' ')}${cwd ? ` (in ${cwd})` : ''}`);
 
     // Fix: Ensure we don't double quote if args already has quotes, but here args is constructed by us.
     // The command string needs to be carefully constructed.
-    cp.exec(`"${exePath}" ${command} ${args}`, { cwd: cwd }, (err, stdout, stderr) => {
+    cp.execFile(exePath, [command, ...args], { cwd: cwd }, (err, stdout, stderr) => {
         if (err) {
             outputChannel.appendLine(`[ERROR] ${stderr}`);
             vscode.window.showErrorMessage('BetterGit Error: ' + stderr);

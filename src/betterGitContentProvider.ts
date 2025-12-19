@@ -44,7 +44,7 @@ export class BetterGitContentProvider implements vscode.TextDocumentContentProvi
             }
 
             outputChannel.appendLine(`[INFO] Loading file content: ${relPath} from ${sha}`);
-            cp.exec(`"${exePath}" cat-file ${sha} "${relPath}"`, { cwd: repoPath }, (err, stdout) => {
+            cp.execFile(exePath, ['cat-file', sha, relPath], { cwd: repoPath }, (err, stdout) => {
                 if (err) {
                     outputChannel.appendLine(`[INFO] File not found in ${sha}: ${relPath} (new file)`);
                     resolve(""); // Return empty if error (e.g. new file)

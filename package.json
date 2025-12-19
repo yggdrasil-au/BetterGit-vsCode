@@ -2,7 +2,7 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.0.41",
+    "version": "0.0.36",
     "engines": {
         "vscode": "^1.106.1"
     },
@@ -25,6 +25,16 @@
                     "type": "string",
                     "default": "",
                     "markdownDescription": "Path to the BetterGit executable (`BetterGit.exe`).\n\nAlternatively, you can edit this in [settings.json](command:workbench.action.openSettingsJson)."
+                },
+                "bettergit.submoduleChanges.openRepoNode": {
+                    "type": "boolean",
+                    "default": true,
+                    "markdownDescription": "When a change item is a submodule (directory/gitlink), reveal and expand the submodule's repo node in the BetterGit view instead of opening a diff."
+                },
+                "bettergit.submoduleChanges.revealInExplorer": {
+                    "type": "boolean",
+                    "default": false,
+                    "markdownDescription": "When a change item is a submodule (directory/gitlink), also reveal the submodule folder in your OS file explorer."
                 }
             }
         },
