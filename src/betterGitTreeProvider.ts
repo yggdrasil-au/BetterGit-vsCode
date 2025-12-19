@@ -183,7 +183,9 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         try {
             const treeData = await this.getTreeData(absPath);
             const hasChanges = !!(treeData && treeData.isInitialized && Array.isArray(treeData.changes) && treeData.changes.length > 0);
-            const publishPending = !!(treeData && treeData.isInitialized && treeData.publish && treeData.publish.isPublishPending);
+            const aheadBy = typeof treeData?.publish?.aheadBy === 'number' ? treeData.publish.aheadBy : 0;
+            // Treat "unpublished commits" as "ahead of upstream" even if isPublishPending isn't set for some reason.
+            const publishPending = !!(treeData && treeData.isInitialized && treeData.publish && treeData.publish.isPublishPending) || aheadBy > 0;
             return this.createRepoItem({ ...data, __publishPending: publishPending }, hasChanges);
         } catch {
             return this.createRepoItem(data, false);
@@ -397,6 +399,10 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     initNodeItem.command = { command: 'bettersourcecontrol.initNode', title: 'Initialize Node', arguments: [repoPath] };
                     items.push(initNodeItem);
                 } else {
+                    const hasActiveChanges = Array.isArray(data.changes) && data.changes.length > 0;
+                    const aheadBy = typeof data.publish?.aheadBy === 'number' ? data.publish.aheadBy : 0;
+                    const isPublishPending = !!data.publish?.isPublishPending || aheadBy > 0;
+
                     const saveItem = new BetterGitItem("Save Changes", vscode.TreeItemCollapsibleState.None, 'action', '');
                     saveItem.command = { command: 'bettersourcecontrol.save', title: 'Save', arguments: [repoPath] };
                     // standard floppy disk icon, always orange colour to indicate unsaved changes
@@ -417,8 +423,11 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
                     const publishItem = new BetterGitItem("Publish (Push)", vscode.TreeItemCollapsibleState.None, 'action', '');
                     publishItem.command = { command: 'bettersourcecontrol.publish', title: 'Publish', arguments: [repoPath] };
-                    // cloud upload icon // always purple to match local-only commits color
-                    publishItem.iconPath = new vscode.ThemeIcon('cloud-upload', new vscode.ThemeColor('charts.purple'));
+                    // cloud upload icon; tint only when publish is pending (purple), or pending+changes (pink)
+                    const publishTint = this.getPublishTintColor(hasActiveChanges, isPublishPending);
+                    publishItem.iconPath = publishTint
+                        ? new vscode.ThemeIcon('cloud-upload', publishTint)
+                        : new vscode.ThemeIcon('cloud-upload');
                     items.push(publishItem);
 
                     const channelItem = new BetterGitItem("Set Release Channel", vscode.TreeItemCollapsibleState.None, 'action', '');
@@ -474,12 +483,15 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     return items;
                 }
                 const aheadBy = typeof data.publish?.aheadBy === 'number' ? data.publish.aheadBy : 0;
+                const hasActiveChanges = Array.isArray(data.changes) && data.changes.length > 0;
+                const isPublishPending = !!data.publish?.isPublishPending || aheadBy > 0;
                 data.timeline.forEach((commit: any, index: number) => {
                     const item = new BetterGitItem(`[${commit.version}] ${commit.message}`, vscode.TreeItemCollapsibleState.None, 'commit', commit.id, undefined, { repoPath });
 
                     // Highlight local-only commits (not yet pushed/published).
                     if (aheadBy > 0 && index < aheadBy) {
-                        item.iconPath = new vscode.ThemeIcon('git-commit', new vscode.ThemeColor('charts.purple'));
+                        const tint = this.getPublishTintColor(hasActiveChanges, isPublishPending);
+                        item.iconPath = tint ? new vscode.ThemeIcon('git-commit', tint) : new vscode.ThemeIcon('git-commit');
                         item.description = 'Local only (not published)';
                         item.tooltip = `ID: ${commit.id}\nLocal only (not published)`;
                     }

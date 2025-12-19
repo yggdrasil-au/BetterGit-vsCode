@@ -147,14 +147,19 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // 8. Register "Publish" Command
-    vscode.commands.registerCommand('bettersourcecontrol.publish', (repoPath?: string) => {
-        vscode.window.showInformationMessage('Publishing to all remotes...', 'Cancel')
-            .then(selection => {
-                if (selection !== 'Cancel') {
-                    const targetPath = repoPath || rootPath;
-                    runBetterGitCommand('publish', [], targetPath, providerPath(context), betterGitProvider);
-                }
-            });
+    vscode.commands.registerCommand('bettersourcecontrol.publish', async (repoPath?: string) => {
+        const targetPath = repoPath || rootPath;
+        if (!targetPath) return;
+
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: 'Publishing to all remotes...'
+            },
+            async () => {
+                await runBetterGitCommand('publish', [], targetPath, providerPath(context), betterGitProvider);
+            }
+        );
     });
 
     // --- NEW: INIT ---
@@ -244,10 +249,10 @@ function providerPath(context: vscode.ExtensionContext): string {
 }
 
 // Helper to run your C# EXE
-function runBetterGitCommand(command: string, args: string[], cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider) {
+function runBetterGitCommand(command: string, args: string[], cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider): Promise<void> {
     if (!cwd) {
         // If running init from a blank window, we might not have a CWD, so we don't pass one to exec
-        if (command !== 'init') return;
+        if (command !== 'init') return Promise.resolve();
     }
 
     const config = vscode.workspace.getConfiguration('bettergit');
@@ -256,7 +261,7 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
     if (!exePath) {
         outputChannel.appendLine(`[ERROR] BetterGit executable path is not configured. Please set "bettergit.executablePath" in settings.`);
         vscode.window.showErrorMessage('BetterGit executable path is not configured. Please set "bettergit.executablePath" in settings.');
-        return;
+        return Promise.resolve();
     }
 
     // Log the command being executed
@@ -264,19 +269,29 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
 
     // Fix: Ensure we don't double quote if args already has quotes, but here args is constructed by us.
     // The command string needs to be carefully constructed.
-    cp.execFile(exePath, [command, ...args], { cwd: cwd }, (err, stdout, stderr) => {
-        if (err) {
-            outputChannel.appendLine(`[ERROR] ${stderr}`);
-            vscode.window.showErrorMessage('BetterGit Error: ' + stderr);
-        } else {
-            if (stdout) {
-                outputChannel.appendLine(`[OUTPUT] ${stdout}`);
-                vscode.window.showInformationMessage(stdout);
+    return new Promise<void>((resolve) => {
+        cp.execFile(exePath, [command, ...args], { cwd: cwd }, (err, stdout, stderr) => {
+            try {
+                if (err) {
+                    if (stderr) {
+                        outputChannel.appendLine(`[ERROR] ${stderr}`);
+                        vscode.window.showErrorMessage('BetterGit Error: ' + stderr);
+                    } else {
+                        outputChannel.appendLine(`[ERROR] ${String(err)}`);
+                        vscode.window.showErrorMessage('BetterGit Error: ' + String(err));
+                    }
+                } else {
+                    if (stdout) {
+                        outputChannel.appendLine(`[OUTPUT] ${stdout}`);
+                        vscode.window.showInformationMessage(stdout);
+                    }
+                    provider.refresh(); // Update the tree view after action
+                    restoreExpandedState(provider);
+                }
+            } finally {
+                resolve();
             }
-            provider.refresh(); // Update the tree view after action
-            restoreExpandedState(provider);
-        }
-
+        });
     });
 }
 
