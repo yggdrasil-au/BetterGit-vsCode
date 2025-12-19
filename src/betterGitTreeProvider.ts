@@ -8,20 +8,19 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     private _onDidChangeTreeData: vscode.EventEmitter<BetterGitItem | undefined | null | void> = new vscode.EventEmitter<BetterGitItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<BetterGitItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
-    public selectedRepoPath: string | undefined;
     private repoData: any = null;
+    private treeDataCache: Map<string, any> = new Map();
+    private treeDataErrorCache: Map<string, string> = new Map();
+    private otherModulesCache: BetterGitItem[] | null = null;
 
     constructor(private workspaceRoot: string | undefined, private extensionPath: string) {
-        this.selectedRepoPath = workspaceRoot;
     }
 
     refresh(): void {
         this.repoData = null; // Clear cache to re-scan
-        this._onDidChangeTreeData.fire();
-    }
-
-    selectRepo(path: string) {
-        this.selectedRepoPath = path;
+        this.treeDataCache.clear();
+        this.treeDataErrorCache.clear();
+        this.otherModulesCache = null;
         this._onDidChangeTreeData.fire();
     }
 
@@ -42,88 +41,108 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 this.repoData = repos;
                 const items: BetterGitItem[] = [];
 
-                // 1. Repositories Section (always show for visibility, even if no children)
-                // Check if root has children
-                const hasChildren = repos && repos.Children && repos.Children.length > 0;
-
+                // Repositories Section (always show for visibility)
                 items.push(new BetterGitItem('Repositories', vscode.TreeItemCollapsibleState.Expanded, 'section-repos', ''));
 
-                // 2. Active Repo Status
-                // Ensure selectedRepoPath is set
-                if (!this.selectedRepoPath) this.selectedRepoPath = this.workspaceRoot;
-
-                return this.getTreeData(this.selectedRepoPath!).then(data => {
-                    if (!data || !data.isInitialized) {
-                        const initItem = new BetterGitItem("Initialize Repository", vscode.TreeItemCollapsibleState.None, 'action', '');
-                        initItem.command = { command: 'bettersourcecontrol.init', title: 'Initialize' };
-
-                        const initNodeItem = new BetterGitItem("Initialize Node Repository", vscode.TreeItemCollapsibleState.None, 'action', '');
-                        initNodeItem.command = { command: 'bettersourcecontrol.initNode', title: 'Initialize Node' };
-
-                        items.push(initItem);
-                        items.push(initNodeItem);
-                    } else {
-                        // Always show Active Repo Name for clarity
-                        const name = path.basename(this.selectedRepoPath!);
-                        items.push(new BetterGitItem(`Active: ${name}`, vscode.TreeItemCollapsibleState.None, 'info', ''));
-
-                        items.push(new BetterGitItem('Manage Repo', vscode.TreeItemCollapsibleState.Expanded, 'section-manage', ''));
-                        items.push(new BetterGitItem('Changes', vscode.TreeItemCollapsibleState.Expanded, 'section-changes', ''));
-                        items.push(new BetterGitItem('Timeline', vscode.TreeItemCollapsibleState.Collapsed, 'section-timeline', ''));
-                        items.push(new BetterGitItem('Archives (Undone)', vscode.TreeItemCollapsibleState.Collapsed, 'section-archives', ''));
-                    }
-                    return items;
-                });
+                return Promise.resolve(items);
             });
         }
 
         // Repositories Section
         if (element.contextValue === 'section-repos') {
             if (this.repoData) {
-                // FIX: Only show the root repo. Its children are accessible by expanding it.
-                // Previously, we were pushing the root AND its children, causing duplication.
-                const items: BetterGitItem[] = [this.createRepoItem(this.repoData)];
-                return Promise.resolve(items);
+                const mainRepoPromise = this.createRepoItemWithStatus(this.repoData);
+                return mainRepoPromise.then(mainRepoItem => {
+                    const items: BetterGitItem[] = [];
+                    items.push(new BetterGitItem('Main Repo', vscode.TreeItemCollapsibleState.Expanded, 'section-main-repo', ''));
+                    items.push(mainRepoItem);
+                    items.push(new BetterGitItem('Submodules', vscode.TreeItemCollapsibleState.Expanded, 'section-submodules', ''));
+                    items.push(new BetterGitItem('Other Modules', vscode.TreeItemCollapsibleState.Collapsed, 'section-other-modules', ''));
+                    return items;
+                });
             }
             return Promise.resolve([]);
         }
 
-        // Repo Item (Recursive)
-        if (element.contextValue === 'repo-item') {
-            if (element.data && element.data.Children && element.data.Children.length > 0) {
-                return Promise.resolve(element.data.Children.map((child: any) => this.createRepoItem(child)));
-            }
+        // Main Repo container (no children; main repo is a sibling item below the header)
+        if (element.contextValue === 'section-main-repo') {
             return Promise.resolve([]);
         }
 
-        // Standard Sections
-        return this.getDataFromCSharp(element.contextValue);
+        // Submodules section (expanded by default)
+        if (element.contextValue === 'section-submodules') {
+            const submodules = (this.repoData?.Children || []).filter((c: any) => (c.Type || '').toLowerCase() === 'submodule');
+            if (!submodules.length) return Promise.resolve([]);
+            return Promise.all(submodules.map((child: any) => this.createRepoItemWithStatus(child)));
+        }
+
+        // Other modules section (collapsed by default, lazy-loaded)
+        if (element.contextValue === 'section-other-modules') {
+            if (this.otherModulesCache) return Promise.resolve(this.otherModulesCache);
+            return this.scanOtherModules().then(repos => {
+                return Promise.all(repos.map((r: any) => this.createRepoItemWithStatus(r))).then(items => {
+                    this.otherModulesCache = items;
+                    return items;
+                });
+            });
+        }
+
+        // Repo Section (children: Manage/Changes/Timeline/Archives + nested repos)
+        if (element.contextValue === 'repo-section') {
+            const repoPath: string | undefined = element.data?.repoPath;
+            const items: BetterGitItem[] = [];
+
+            if (repoPath) {
+                items.push(new BetterGitItem('Manage Repo', vscode.TreeItemCollapsibleState.Expanded, 'section-manage', '', undefined, { repoPath }));
+                items.push(new BetterGitItem('Changes', vscode.TreeItemCollapsibleState.Expanded, 'section-changes', '', undefined, { repoPath }));
+                items.push(new BetterGitItem('Timeline', vscode.TreeItemCollapsibleState.Collapsed, 'section-timeline', '', undefined, { repoPath }));
+                items.push(new BetterGitItem('Archives (Undone)', vscode.TreeItemCollapsibleState.Collapsed, 'section-archives', '', undefined, { repoPath }));
+            }
+
+            return Promise.resolve(items);
+        }
+
+        // Standard Sections (scoped to a repo)
+        if (element.contextValue?.startsWith('section-')) {
+            const repoPath: string | undefined = element.data?.repoPath;
+            if (!repoPath) return Promise.resolve([]);
+            return this.getDataFromCSharp(element.contextValue, repoPath);
+        }
+
+        return Promise.resolve([]);
     }
 
-    private createRepoItem(data: any): BetterGitItem {
-        const hasChildren = data.Children && data.Children.length > 0;
-        const state = hasChildren ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None;
-
-        const item = new BetterGitItem(data.Name, state, 'repo-item', '', undefined, data);
+    private createRepoItem(data: any, hasActiveChanges: boolean): BetterGitItem {
+        const state = vscode.TreeItemCollapsibleState.Collapsed;
 
         // Path handling
         // data.Path is relative to workspace root.
         const absPath = path.join(this.workspaceRoot!, data.Path);
 
+        const label = hasActiveChanges ? `* ${data.Name}` : data.Name;
+
+        const item = new BetterGitItem(label, state, 'repo-section', '', undefined, {
+            ...data,
+            repoPath: absPath
+        });
+
         item.description = data.Path;
-        item.command = { command: 'bettersourcecontrol.selectRepo', title: 'Select', arguments: [absPath] };
-
-        // Normalize paths for comparison
-        const normSelected = this.selectedRepoPath ? path.normalize(this.selectedRepoPath).toLowerCase() : '';
-        const normCurrent = path.normalize(absPath).toLowerCase();
-
-        if (normSelected === normCurrent) {
-            item.iconPath = new vscode.ThemeIcon('check');
-        } else {
-            item.iconPath = new vscode.ThemeIcon('repo');
-        }
+        item.iconPath = hasActiveChanges
+            ? new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'))
+            : new vscode.ThemeIcon('repo');
 
         return item;
+    }
+
+    private async createRepoItemWithStatus(data: any): Promise<BetterGitItem> {
+        const absPath = path.join(this.workspaceRoot!, data.Path);
+        try {
+            const treeData = await this.getTreeData(absPath);
+            const hasChanges = !!(treeData && treeData.isInitialized && Array.isArray(treeData.changes) && treeData.changes.length > 0);
+            return this.createRepoItem(data, hasChanges);
+        } catch {
+            return this.createRepoItem(data, false);
+        }
     }
 
     private scanRepositories(): Promise<any> {
@@ -141,7 +160,8 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
             // Call scan-repos
             outputChannel.appendLine(`[INFO] Scanning repositories in ${this.workspaceRoot}`);
-            const child = cp.exec(`"${exePath}" scan-repos --path "${this.workspaceRoot}"`, { cwd: this.workspaceRoot }, (err, stdout, stderr) => {
+            // UI: do not scan nested repos at startup; lazy-load them under "Other Modules".
+            const child = cp.exec(`"${exePath}" scan-repos --path "${this.workspaceRoot}" --no-nested`, { cwd: this.workspaceRoot }, (err, stdout, stderr) => {
                 if (err) {
                     outputChannel.appendLine(`[ERROR] Failed to scan repositories: ${err.message}`);
                     if (stderr) {
@@ -167,7 +187,41 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         });
     }
 
+    private scanOtherModules(): Promise<any[]> {
+        return new Promise(resolve => {
+            const config = vscode.workspace.getConfiguration('bettergit');
+            const exePath = config.get<string>('executablePath');
+            if (!exePath) {
+                outputChannel.appendLine('[ERROR] BetterGit executable path not configured');
+                resolve([]);
+                return;
+            }
+
+            outputChannel.appendLine(`[INFO] Scanning other modules in ${this.workspaceRoot}`);
+            cp.exec(`"${exePath}" scan-nested-repos --path "${this.workspaceRoot}"`, { cwd: this.workspaceRoot }, (err, stdout, stderr) => {
+                if (err) {
+                    outputChannel.appendLine(`[ERROR] Failed to scan other modules: ${err.message}`);
+                    if (stderr) outputChannel.appendLine(`[STDERR] ${stderr}`);
+                    resolve([]);
+                    return;
+                }
+                if (stderr) outputChannel.appendLine(`[STDERR] ${stderr}`);
+                try {
+                    const data = JSON.parse(stdout);
+                    resolve(Array.isArray(data) ? data : []);
+                } catch (e) {
+                    outputChannel.appendLine(`[ERROR] Failed to parse other modules output: ${e}`);
+                    outputChannel.appendLine(`[DEBUG] Received stdout: "${stdout}"`);
+                    resolve([]);
+                }
+            });
+        });
+    }
+
     private getTreeData(repoPath: string): Promise<any> {
+        const cached = this.treeDataCache.get(repoPath);
+        if (cached) return Promise.resolve(cached);
+
         return new Promise(resolve => {
             const config = vscode.workspace.getConfiguration('bettergit');
             let exePath = config.get<string>('executablePath');
@@ -191,59 +245,90 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     if (stderr) {
                         outputChannel.appendLine(`[STDERR] ${stderr}`);
                     }
+                    this.treeDataErrorCache.set(repoPath, stderr || err.message);
                     resolve(null);
                     return;
                 }
                 if (stderr) {
                     outputChannel.appendLine(`[STDERR] ${stderr}`);
                 }
+
+                const trimmed = (stdout || '').trim();
+                if (!trimmed) {
+                    const detail = stderr ? stderr.trim() : 'Empty output from BetterGit.';
+                    outputChannel.appendLine(`[ERROR] Tree data was empty for ${repoPath}. ${detail}`);
+                    this.treeDataErrorCache.set(repoPath, detail);
+                    resolve(null);
+                    return;
+                }
                 try {
                     outputChannel.appendLine(`[INFO] Tree data loaded successfully`);
-                    resolve(JSON.parse(stdout));
+                    const parsed = JSON.parse(stdout);
+                    this.treeDataCache.set(repoPath, parsed);
+                    this.treeDataErrorCache.delete(repoPath);
+                    resolve(parsed);
                 } catch (e) {
                     outputChannel.appendLine(`[ERROR] Failed to parse tree data: ${e}`);
                     outputChannel.appendLine(`[DEBUG] Received stdout: "${stdout}"`);
+                    this.treeDataErrorCache.set(repoPath, `Failed to parse JSON from BetterGit. ${stderr ? `STDERR: ${stderr.trim()}` : ''}`.trim());
                     resolve(null);
                 }
             });
         });
     }
 
-    private getDataFromCSharp(section: string | undefined): Promise<BetterGitItem[]> {
-        if (!this.selectedRepoPath) return Promise.resolve([]);
-
-        return this.getTreeData(this.selectedRepoPath).then(data => {
+    private getDataFromCSharp(section: string | undefined, repoPath: string): Promise<BetterGitItem[]> {
+        return this.getTreeData(repoPath).then(data => {
             if (!data) {
-                const errorItem = new BetterGitItem("Error loading data", vscode.TreeItemCollapsibleState.None, 'error', '');
+                const detail = this.treeDataErrorCache.get(repoPath);
+                const label = detail ? `Error loading data: ${detail}` : 'Error loading data';
+                const errorItem = new BetterGitItem(label, vscode.TreeItemCollapsibleState.None, 'error', '', undefined, { repoPath });
                 return [errorItem];
             }
 
             const items: BetterGitItem[] = [];
 
             if (section === 'section-manage') {
-                // We only show Manage items if initialized (which is guaranteed if we are here)
-                const saveItem = new BetterGitItem("Save Changes", vscode.TreeItemCollapsibleState.None, 'action', '');
-                saveItem.command = { command: 'bettersourcecontrol.save', title: 'Save' };
-                items.push(saveItem);
+                if (!data.isInitialized) {
+                    const initItem = new BetterGitItem("Initialize Repository", vscode.TreeItemCollapsibleState.None, 'action', '');
+                    initItem.command = { command: 'bettersourcecontrol.init', title: 'Initialize', arguments: [repoPath] };
+                    items.push(initItem);
 
-                const undoItem = new BetterGitItem("Undo Last Save", vscode.TreeItemCollapsibleState.None, 'action', '');
-                undoItem.command = { command: 'bettersourcecontrol.undo', title: 'Undo' };
-                items.push(undoItem);
+                    const initNodeItem = new BetterGitItem("Initialize Node Repository", vscode.TreeItemCollapsibleState.None, 'action', '');
+                    initNodeItem.command = { command: 'bettersourcecontrol.initNode', title: 'Initialize Node', arguments: [repoPath] };
+                    items.push(initNodeItem);
+                } else {
+                    const saveItem = new BetterGitItem("Save Changes", vscode.TreeItemCollapsibleState.None, 'action', '');
+                    saveItem.command = { command: 'bettersourcecontrol.save', title: 'Save', arguments: [repoPath] };
+                    items.push(saveItem);
 
-                const redoItem = new BetterGitItem("Redo Last Undo", vscode.TreeItemCollapsibleState.None, 'action', '');
-                redoItem.command = { command: 'bettersourcecontrol.redo', title: 'Redo' };
-                items.push(redoItem);
+                    const undoItem = new BetterGitItem("Undo Last Save", vscode.TreeItemCollapsibleState.None, 'action', '');
+                    undoItem.command = { command: 'bettersourcecontrol.undo', title: 'Undo', arguments: [repoPath] };
+                    items.push(undoItem);
 
-                const publishItem = new BetterGitItem("Publish (Push)", vscode.TreeItemCollapsibleState.None, 'action', '');
-                publishItem.command = { command: 'bettersourcecontrol.publish', title: 'Publish' };
-                items.push(publishItem);
+                    const redoItem = new BetterGitItem("Redo Last Undo", vscode.TreeItemCollapsibleState.None, 'action', '');
+                    redoItem.command = { command: 'bettersourcecontrol.redo', title: 'Redo', arguments: [repoPath] };
+                    items.push(redoItem);
+
+                    const publishItem = new BetterGitItem("Publish (Push)", vscode.TreeItemCollapsibleState.None, 'action', '');
+                    publishItem.command = { command: 'bettersourcecontrol.publish', title: 'Publish', arguments: [repoPath] };
+                    items.push(publishItem);
+
+                    const channelItem = new BetterGitItem("Set Release Channel", vscode.TreeItemCollapsibleState.None, 'action', '');
+                    channelItem.command = { command: 'bettersourcecontrol.setChannel', title: 'Set Release Channel', arguments: [repoPath] };
+                    items.push(channelItem);
+                }
             }
             else if (section === 'section-changes') {
+                if (!data.isInitialized) {
+                    items.push(new BetterGitItem("Repository is not initialized", vscode.TreeItemCollapsibleState.None, 'info', ''));
+                    return items;
+                }
                 data.changes.forEach((change: any) => {
                     const file = change.path;
                     const status = change.status;
 
-                    const uri = vscode.Uri.file(path.join(this.selectedRepoPath!, file));
+                    const uri = vscode.Uri.file(path.join(repoPath, file));
 
                     const label = path.basename(file);
                     const item = new BetterGitItem(label, vscode.TreeItemCollapsibleState.None, 'file', '', uri);
@@ -260,21 +345,29 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                         item.command = {
                             command: 'bettersourcecontrol.openDiff',
                             title: 'Open Diff',
-                            arguments: [file, status]
+                            arguments: [file, status, repoPath]
                         };
                     }
                     items.push(item);
                 });
             }
             else if (section === 'section-timeline') {
+                if (!data.isInitialized) {
+                    items.push(new BetterGitItem("Repository is not initialized", vscode.TreeItemCollapsibleState.None, 'info', ''));
+                    return items;
+                }
                 data.timeline.forEach((commit: any) => {
-                    items.push(new BetterGitItem(`[${commit.version}] ${commit.message}`, vscode.TreeItemCollapsibleState.None, 'commit', commit.id));
+                    items.push(new BetterGitItem(`[${commit.version}] ${commit.message}`, vscode.TreeItemCollapsibleState.None, 'commit', commit.id, undefined, { repoPath }));
                 });
             }
             else if (section === 'section-archives') {
+                if (!data.isInitialized) {
+                    items.push(new BetterGitItem("Repository is not initialized", vscode.TreeItemCollapsibleState.None, 'info', ''));
+                    return items;
+                }
                 data.archives.forEach((branch: any) => {
                     const label = `[${branch.version}] ${branch.message}`;
-                    const item = new BetterGitItem(label, vscode.TreeItemCollapsibleState.None, 'archive-item', branch.sha);
+                    const item = new BetterGitItem(label, vscode.TreeItemCollapsibleState.None, 'archive-item', branch.sha, undefined, { repoPath });
                     item.description = branch.name;
                     items.push(item);
                 });

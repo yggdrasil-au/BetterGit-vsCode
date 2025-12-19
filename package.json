@@ -2,7 +2,7 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.0.37",
+    "version": "0.0.41",
     "engines": {
         "vscode": "^1.106.1"
     },
@@ -102,11 +102,6 @@
             "view/title": [
                 {
                     "command": "bettersourcecontrol.refresh",
-                    "when": "view == BetterSourceControlView",
-                    "group": "navigation"
-                },
-                {
-                    "command": "bettersourcecontrol.setChannel",
                     "when": "view == BetterSourceControlView",
                     "group": "navigation"
                 }
