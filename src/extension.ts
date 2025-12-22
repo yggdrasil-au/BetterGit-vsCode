@@ -12,6 +12,10 @@ let betterGitTreeView: vscode.TreeView<BetterGitItem> | undefined;
 const expandedRepoPaths = new Set<string>();
 const expandedSectionKeys = new Set<string>();
 
+// When we refresh the tree, VS Code may emit collapse/expand events as nodes are re-materialized.
+// We suppress our bookkeeping during that window so we only record user-driven changes.
+let suppressTreeStateTracking = false;
+
 function normalizeAbsPath(p: string): string {
     return path.normalize(p).toLowerCase();
 }
@@ -33,6 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Track expanded/collapsed state so refresh doesn't collapse the view.
     betterGitTreeView.onDidExpandElement(e => {
+        if (suppressTreeStateTracking) return;
         const el = e.element;
         const repoPath = el?.data?.repoPath as string | undefined;
         if (el.contextValue === 'repo-section' && repoPath) {
@@ -44,6 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     betterGitTreeView.onDidCollapseElement(e => {
+        if (suppressTreeStateTracking) return;
         const el = e.element;
         const repoPath = el?.data?.repoPath as string | undefined;
         if (el.contextValue === 'repo-section' && repoPath) {
@@ -96,7 +102,9 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // 6. Register "Refresh" (Manual Trigger)
-    vscode.commands.registerCommand('bettersourcecontrol.refresh', () => betterGitProvider.refresh());
+    vscode.commands.registerCommand('bettersourcecontrol.refresh', async () => {
+        await refreshTreePreservingUiState(betterGitProvider);
+    });
 
     // 6b. Handle directory/submodule change clicks
     vscode.commands.registerCommand('bettersourcecontrol.openDirectoryChange', async (targetAbsPath: string) => {
@@ -248,6 +256,44 @@ function providerPath(context: vscode.ExtensionContext): string {
     return context.extensionPath;
 }
 
+async function refreshTreePreservingUiState(provider: BetterGitTreeProvider): Promise<void> {
+    if (!betterGitTreeView) {
+        provider.refresh();
+        return;
+    }
+
+    // Snapshot state before refresh, because refresh can trigger collapse events.
+    const repoPathsSnapshot = Array.from(expandedRepoPaths);
+    const sectionKeysSnapshot = Array.from(expandedSectionKeys);
+
+    const selected = betterGitTreeView.selection?.[0];
+    const selectedRepoPath = selected?.data?.repoPath as string | undefined;
+    const selectedContext = selected?.contextValue;
+
+    suppressTreeStateTracking = true;
+    try {
+        provider.refresh();
+        await restoreExpandedState(provider, repoPathsSnapshot, sectionKeysSnapshot);
+
+        // Best-effort: keep selection stable across refresh.
+        if (selectedRepoPath && selectedContext) {
+            if (selectedContext === 'repo-section') {
+                const repoItem = provider.getRepoItemByRepoPath(selectedRepoPath);
+                if (repoItem) {
+                    await betterGitTreeView.reveal(repoItem, { expand: false, select: true, focus: false });
+                }
+            } else if (selectedContext.startsWith('section-')) {
+                const sectionItem = provider.getSectionItem(selectedRepoPath, selectedContext);
+                if (sectionItem) {
+                    await betterGitTreeView.reveal(sectionItem, { expand: false, select: true, focus: false });
+                }
+            }
+        }
+    } finally {
+        suppressTreeStateTracking = false;
+    }
+}
+
 // Helper to run your C# EXE
 function runBetterGitCommand(command: string, args: string[], cwd: string | undefined, extPath: string, provider: BetterGitTreeProvider): Promise<void> {
     if (!cwd) {
@@ -270,7 +316,7 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
     // Fix: Ensure we don't double quote if args already has quotes, but here args is constructed by us.
     // The command string needs to be carefully constructed.
     return new Promise<void>((resolve) => {
-        cp.execFile(exePath, [command, ...args], { cwd: cwd }, (err, stdout, stderr) => {
+        cp.execFile(exePath, [command, ...args], { cwd: cwd }, async (err, stdout, stderr) => {
             try {
                 // BetterGit may write warnings/errors to stderr even when it exits with code 0.
                 // Surface stderr so actions like Publish don't appear to do nothing.
@@ -297,48 +343,42 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
                 }
             } finally {
                 // Always refresh after an attempted action so the UI reflects the latest state.
-                provider.refresh();
-                restoreExpandedState(provider);
+                await refreshTreePreservingUiState(provider);
                 resolve();
             }
         });
     });
 }
 
-function restoreExpandedState(provider: BetterGitTreeProvider) {
+async function restoreExpandedState(provider: BetterGitTreeProvider, repoPaths: string[], sectionKeys: string[]): Promise<void> {
     if (!betterGitTreeView) return;
 
-    // Restore repo expansions first, then section expansions.
-    const repoPaths = Array.from(expandedRepoPaths);
-    const sectionKeys = Array.from(expandedSectionKeys);
-
     // Defer slightly so the provider has a chance to re-scan and re-materialize nodes.
-    setTimeout(async () => {
-        for (const repoKey of repoPaths) {
-            // repoKey is normalized; provider expects the real absolute path. Try to find any cached item that matches.
-            const repoItem = provider.getRepoItemByRepoPath(repoKey) || provider.getRepoItemByRepoPath(repoKey.toUpperCase()) || provider.getRepoItemByRepoPath(repoKey.toLowerCase());
-            if (repoItem) {
-                try {
-                    await betterGitTreeView!.reveal(repoItem, { expand: 1, select: false, focus: false });
-                } catch {
-                    // ignore
-                }
-            }
-        }
+    await new Promise(resolve => setTimeout(resolve, 75));
 
-        for (const key of sectionKeys) {
-            const [repoKey, section] = key.split('|');
-            if (!repoKey || !section) continue;
-
-            // Best-effort: provider caches section items by repoPath+context.
-            const sectionItem = provider.getSectionItem(repoKey, section);
-            if (sectionItem) {
-                try {
-                    await betterGitTreeView!.reveal(sectionItem, { expand: 1, select: false, focus: false });
-                } catch {
-                    // ignore
-                }
-            }
+    // Restore repo expansions first, then section expansions.
+    for (const repoKey of repoPaths) {
+        // repoKey is normalized; provider expects the real absolute path. Try to find any cached item that matches.
+        const repoItem = provider.getRepoItemByRepoPath(repoKey) || provider.getRepoItemByRepoPath(repoKey.toUpperCase()) || provider.getRepoItemByRepoPath(repoKey.toLowerCase());
+        if (!repoItem) continue;
+        try {
+            await betterGitTreeView.reveal(repoItem, { expand: 1, select: false, focus: false });
+        } catch {
+            // ignore
         }
-    }, 75);
+    }
+
+    for (const key of sectionKeys) {
+        const [repoKey, section] = key.split('|');
+        if (!repoKey || !section) continue;
+
+        // Best-effort: provider caches section items by repoPath+context.
+        const sectionItem = provider.getSectionItem(repoKey, section);
+        if (!sectionItem) continue;
+        try {
+            await betterGitTreeView.reveal(sectionItem, { expand: 1, select: false, focus: false });
+        } catch {
+            // ignore
+        }
+    }
 }

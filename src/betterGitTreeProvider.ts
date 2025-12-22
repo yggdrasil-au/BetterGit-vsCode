@@ -17,6 +17,12 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     private sectionItemCache: Map<string, BetterGitItem> = new Map();
     private submoduleRelPathsByRepo: Map<string, Set<string>> = new Map();
 
+    // Root/header items are kept stable so VS Code preserves their expanded/collapsed UI state
+    // across refreshes (new objects would reset the state).
+    private repositoriesHeaderItem: BetterGitItem | null = null;
+    private submodulesHeaderItem: BetterGitItem | null = null;
+    private otherModulesHeaderItem: BetterGitItem | null = null;
+
     constructor(private workspaceRoot: string | undefined, private extensionPath: string) {
     }
 
@@ -58,7 +64,12 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 const items: BetterGitItem[] = [];
 
                 // Repositories Section (always show for visibility)
-                items.push(new BetterGitItem('Repositories', vscode.TreeItemCollapsibleState.Expanded, 'section-repos', ''));
+                if (!this.repositoriesHeaderItem) {
+                    this.repositoriesHeaderItem = new BetterGitItem('Repositories', vscode.TreeItemCollapsibleState.Expanded, 'section-repos', '');
+                } else {
+                    this.repositoriesHeaderItem.label = 'Repositories';
+                }
+                items.push(this.repositoriesHeaderItem);
 
                 return Promise.resolve(items);
             });
@@ -72,8 +83,21 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     const items: BetterGitItem[] = [];
                     //items.push(new BetterGitItem('Main Repo', vscode.TreeItemCollapsibleState.Expanded, 'section-main-repo', ''));
                     items.push(mainRepoItem);
-                    items.push(new BetterGitItem('Submodules', vscode.TreeItemCollapsibleState.Expanded, 'section-submodules', ''));
-                    items.push(new BetterGitItem('Other Modules', vscode.TreeItemCollapsibleState.Collapsed, 'section-other-modules', ''));
+
+                    if (!this.submodulesHeaderItem) {
+                        this.submodulesHeaderItem = new BetterGitItem('Submodules', vscode.TreeItemCollapsibleState.Expanded, 'section-submodules', '');
+                    } else {
+                        this.submodulesHeaderItem.label = 'Submodules';
+                    }
+
+                    if (!this.otherModulesHeaderItem) {
+                        this.otherModulesHeaderItem = new BetterGitItem('Other Modules', vscode.TreeItemCollapsibleState.Collapsed, 'section-other-modules', '');
+                    } else {
+                        this.otherModulesHeaderItem.label = 'Other Modules';
+                    }
+
+                    items.push(this.submodulesHeaderItem);
+                    items.push(this.otherModulesHeaderItem);
                     return items;
                 });
             }
