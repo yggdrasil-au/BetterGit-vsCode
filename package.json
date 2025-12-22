@@ -2,7 +2,7 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.2.0",
+    "version": "0.2.2",
     "engines": {
         "vscode": "^1.106.1"
     },
@@ -108,6 +108,16 @@
                 "command": "bettersourcecontrol.setChannel",
                 "title": "Set Release Channel",
                 "icon": "$(beaker)"
+            },
+            {
+                "command": "bettersourcecontrol.remoteMoveGroup",
+                "title": "Move Remote To Group",
+                "icon": "$(folder)"
+            },
+            {
+                "command": "bettersourcecontrol.remoteTogglePublic",
+                "title": "Toggle Remote Public/Private",
+                "icon": "$(lock)"
             }
         ],
         "menus": {
@@ -137,6 +147,16 @@
                 {
                     "command": "bettersourcecontrol.merge",
                     "when": "view == BetterSourceControlView && viewItem == commit",
+                    "group": "inline"
+                },
+                {
+                    "command": "bettersourcecontrol.remoteMoveGroup",
+                    "when": "view == BetterSourceControlView && viewItem == remote-item",
+                    "group": "inline"
+                },
+                {
+                    "command": "bettersourcecontrol.remoteTogglePublic",
+                    "when": "view == BetterSourceControlView && viewItem == remote-item",
                     "group": "inline"
                 }
             ]

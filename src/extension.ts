@@ -295,6 +295,38 @@ export function activate(context: vscode.ExtensionContext) {
             runBetterGitCommand('set-channel', [channel], targetPath, providerPath(context), betterGitProvider);
         }
     });
+
+    // --- NEW: REMOTE META (GROUP / PUBLIC) ---
+    vscode.commands.registerCommand('bettersourcecontrol.remoteMoveGroup', async (item: BetterGitItem) => {
+        if (!item) return;
+
+        const repoPath = item.data?.repoPath || rootPath;
+        const remoteName = item.data?.remoteName || item.label;
+        if (!repoPath || !remoteName) return;
+
+        const currentGroup = String(item.data?.group || '');
+        const group = await vscode.window.showInputBox({
+            prompt: 'Move remote to group',
+            placeHolder: 'e.g. Public, Private, Mirrors, Work',
+            value: currentGroup || undefined
+        });
+
+        if (group === undefined) return;
+
+        await runBetterGitCommand('remote', ['set-meta', remoteName, '--group', group], repoPath, providerPath(context), betterGitProvider);
+    });
+
+    vscode.commands.registerCommand('bettersourcecontrol.remoteTogglePublic', async (item: BetterGitItem) => {
+        if (!item) return;
+
+        const repoPath = item.data?.repoPath || rootPath;
+        const remoteName = item.data?.remoteName || item.label;
+        if (!repoPath || !remoteName) return;
+
+        const isPublic = !!item.data?.isPublic;
+        const flag = isPublic ? '--private' : '--public';
+        await runBetterGitCommand('remote', ['set-meta', remoteName, flag], repoPath, providerPath(context), betterGitProvider);
+    });
 }
 
 function providerPath(context: vscode.ExtensionContext): string {

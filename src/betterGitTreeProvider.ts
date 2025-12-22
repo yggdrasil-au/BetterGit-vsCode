@@ -142,18 +142,40 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 ? Promise.all(submoduleChildren.map(child => this.createRepoItemWithStatus(child)))
                 : Promise.resolve([] as BetterGitItem[]);
 
-            return submoduleItemsPromise.then(subItems => {
-                items.push(...subItems);
+                return submoduleItemsPromise.then(subItems => {
+                    items.push(...subItems);
 
-                if (repoPath) {
-                    items.push(this.getOrCreateSectionItem(repoPath, 'section-manage', 'Manage Repo', vscode.TreeItemCollapsibleState.Expanded));
-                    items.push(this.getOrCreateSectionItem(repoPath, 'section-changes', 'Changes', vscode.TreeItemCollapsibleState.Expanded));
-                    items.push(this.getOrCreateSectionItem(repoPath, 'section-timeline', 'Timeline', vscode.TreeItemCollapsibleState.Collapsed));
-                    items.push(this.getOrCreateSectionItem(repoPath, 'section-archives', 'Archives (Undone)', vscode.TreeItemCollapsibleState.Collapsed));
-                }
+                    if (repoPath) {
+                        items.push(this.getOrCreateSectionItem(repoPath, 'section-manage', 'Manage Repo', vscode.TreeItemCollapsibleState.Expanded));
+                        items.push(this.getOrCreateSectionItem(repoPath, 'section-remotes', 'Remotes', vscode.TreeItemCollapsibleState.Collapsed));
+                        items.push(this.getOrCreateSectionItem(repoPath, 'section-changes', 'Changes', vscode.TreeItemCollapsibleState.Expanded));
+                        items.push(this.getOrCreateSectionItem(repoPath, 'section-timeline', 'Timeline', vscode.TreeItemCollapsibleState.Collapsed));
+                        items.push(this.getOrCreateSectionItem(repoPath, 'section-archives', 'Archives (Undone)', vscode.TreeItemCollapsibleState.Collapsed));
+                    }
 
-                return items;
+                    return items;
+                });
+        }
+
+        // Remote Groups (scoped to a repo)
+        if (element.contextValue === 'remote-group') {
+            const repoPath: string | undefined = element.data?.repoPath;
+            const remotes: any[] = Array.isArray(element.data?.remotes) ? element.data.remotes : [];
+            if (!repoPath) return Promise.resolve([]);
+
+            remotes.sort((a: any, b: any) => {
+                const ap = String(a?.provider || '').toLowerCase();
+                const bp = String(b?.provider || '').toLowerCase();
+                if (ap < bp) return -1;
+                if (ap > bp) return 1;
+                const an = String(a?.name || '').toLowerCase();
+                const bn = String(b?.name || '').toLowerCase();
+                if (an < bn) return -1;
+                if (an > bn) return 1;
+                return 0;
             });
+
+            return Promise.resolve(remotes.map(r => this.createRemoteItem(repoPath, r)));
         }
 
         // Standard Sections (scoped to a repo)
@@ -502,6 +524,44 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     items.push(item);
                 });
             }
+            else if (section === 'section-remotes') {
+                if (!data.isInitialized) {
+                    items.push(new BetterGitItem("Repository is not initialized", vscode.TreeItemCollapsibleState.None, 'info', ''));
+                    return items;
+                }
+
+                const remotes: any[] = Array.isArray(data.remotes) ? data.remotes : [];
+                if (!remotes.length) {
+                    items.push(new BetterGitItem("No remotes configured", vscode.TreeItemCollapsibleState.None, 'info', ''));
+                    return items;
+                }
+
+                const groups = new Map<string, any[]>();
+                for (const r of remotes) {
+                    const group = String(r?.group || 'Ungrouped').trim() || 'Ungrouped';
+                    const existing = groups.get(group) || [];
+                    existing.push(r);
+                    groups.set(group, existing);
+                }
+
+                const groupNames = Array.from(groups.keys()).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+                for (const groupName of groupNames) {
+                    const groupRemotes = groups.get(groupName) || [];
+                    const groupItem = new BetterGitItem(
+                        groupName,
+                        vscode.TreeItemCollapsibleState.Collapsed,
+                        'remote-group',
+                        '',
+                        undefined,
+                        { repoPath, groupName, remotes: groupRemotes }
+                    );
+                    groupItem.description = `${groupRemotes.length}`;
+                    groupItem.iconPath = new vscode.ThemeIcon('folder');
+                    items.push(groupItem);
+                }
+
+                return items;
+            }
             else if (section === 'section-timeline') {
                 if (!data.isInitialized) {
                     items.push(new BetterGitItem("Repository is not initialized", vscode.TreeItemCollapsibleState.None, 'info', ''));
@@ -539,6 +599,39 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
             return items;
         });
+    }
+
+    private createRemoteItem(repoPath: string, remote: any): BetterGitItem {
+        const name = String(remote?.name || 'unknown');
+        const provider = String(remote?.provider || 'other');
+        const group = String(remote?.group || 'Ungrouped');
+        const isPublic = !!remote?.isPublic;
+        const isMisconfigured = !!remote?.isMisconfigured;
+        const hasMetadata = !!remote?.hasMetadata;
+        const url = String(remote?.pushUrl || remote?.fetchUrl || '');
+
+        const pubLabel = isPublic ? 'Public' : 'Private';
+        const status = isMisconfigured ? 'Misconfigured' : (hasMetadata ? provider : 'Unmanaged');
+        const description = url ? `${status} • ${pubLabel}` : `${status} • ${pubLabel} • (no url)`;
+
+        const item = new BetterGitItem(
+            name,
+            vscode.TreeItemCollapsibleState.None,
+            'remote-item',
+            '',
+            undefined,
+            { repoPath, remoteName: name, provider, group, isPublic, isMisconfigured, url }
+        );
+
+        item.description = description;
+        item.tooltip = url
+            ? `${name}\n${url}\nGroup: ${group}\nProvider: ${provider}\nVisibility: ${pubLabel}\nMetadata: ${hasMetadata ? 'Yes' : 'No'}`
+            : `${name}\nGroup: ${group}\nProvider: ${provider}\nVisibility: ${pubLabel}\nMetadata: ${hasMetadata ? 'Yes' : 'No'}`;
+        item.iconPath = isMisconfigured
+            ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('terminal.ansiYellow'))
+            : new vscode.ThemeIcon('cloud');
+
+        return item;
     }
 
     private normalizeAbsPath(p: string): string {
@@ -636,6 +729,8 @@ export class BetterGitItem extends vscode.TreeItem {
         if (contextValue === 'action') this.iconPath = new vscode.ThemeIcon('play');
         if (contextValue === 'repo-item') this.iconPath = new vscode.ThemeIcon('repo');
         if (contextValue === 'submodule-change') this.iconPath = new vscode.ThemeIcon('repo', new vscode.ThemeColor('gitDecoration.submoduleResourceForeground'));
+        if (contextValue === 'remote-item') this.iconPath = new vscode.ThemeIcon('cloud');
+        if (contextValue === 'remote-group') this.iconPath = new vscode.ThemeIcon('folder');
 
         this.tooltip = sha ? `ID: ${sha}` : label;
     }

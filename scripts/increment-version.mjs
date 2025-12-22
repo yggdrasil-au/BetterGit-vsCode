@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packageJsonPath = path.join(extensionRoot, 'package.json');
-const metaTomlPath = path.join(extensionRoot, '.betterGit', 'meta.toml');
+const projectTomlPath = path.join(extensionRoot, '.betterGit', 'project.toml');
 
 function fail(message) {
 	console.error(message);
@@ -16,8 +16,8 @@ if (!fs.existsSync(packageJsonPath)) {
 	fail(`package.json not found at: ${packageJsonPath}`);
 }
 
-if (!fs.existsSync(metaTomlPath)) {
-	fail(`meta.toml not found at: ${metaTomlPath}`);
+if (!fs.existsSync(projectTomlPath)) {
+	fail(`project.toml not found at: ${projectTomlPath}`);
 }
 
 const pnpmResult = spawnSync('pnpm', ['version', 'patch', '--no-git-tag-version'], {
@@ -42,23 +42,23 @@ const major = Number(match[1]);
 const minor = Number(match[2]);
 const patch = Number(match[3]);
 
-let metaToml = fs.readFileSync(metaTomlPath, 'utf8');
+let projectToml = fs.readFileSync(projectTomlPath, 'utf8');
 
 function setTomlNumber(key, value) {
 	const re = new RegExp(`^${key}\\s*=\\s*\\d+\\s*$`, 'm');
-	if (re.test(metaToml)) {
-		metaToml = metaToml.replace(re, `${key} = ${value}`);
+	if (re.test(projectToml)) {
+		projectToml = projectToml.replace(re, `${key} = ${value}`);
 		return;
 	}
-	if (!metaToml.endsWith('\n')) {
-		metaToml += '\n';
+	if (!projectToml.endsWith('\n')) {
+		projectToml += '\n';
 	}
-	metaToml += `${key} = ${value}\n`;
+	projectToml += `${key} = ${value}\n`;
 }
 
 setTomlNumber('major', major);
 setTomlNumber('minor', minor);
 setTomlNumber('patch', patch);
 
-fs.writeFileSync(metaTomlPath, metaToml, 'utf8');
-console.log(`Synced .betterGit/meta.toml to ${major}.${minor}.${patch}`);
+fs.writeFileSync(projectTomlPath, projectToml, 'utf8');
+console.log(`Synced .betterGit/project.toml to ${major}.${minor}.${patch}`);
