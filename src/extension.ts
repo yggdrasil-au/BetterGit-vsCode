@@ -66,20 +66,65 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 4. Register "Save" Command
     vscode.commands.registerCommand('bettersourcecontrol.save', async (repoPath?: string) => {
+        const targetPath = repoPath || rootPath;
+        if (!targetPath) return;
+
         const message = await vscode.window.showInputBox({ placeHolder: 'What did you change?' });
         if (message !== undefined) {
+            // Get version info
+            let currentVersion = '0.0.0';
+            let lastCommitVersion = 'None';
+            try {
+                const output = await execBetterGit(['get-version-info'], targetPath, context);
+                const info = JSON.parse(output);
+                currentVersion = info.currentVersion || '0.0.0';
+                lastCommitVersion = info.lastCommitVersion || 'None';
+            } catch (e) {
+                // ignore, fallback to defaults
+            }
+
+            // Calculate next versions
+            // Parse current version
+            let major = 0, minor = 0, patch = 0;
+            let suffix = '';
+            const vParts = currentVersion.split('-');
+            if (vParts.length > 1) suffix = '-' + vParts[1];
+            const nums = vParts[0].split('.');
+            if (nums.length >= 1) major = parseInt(nums[0]) || 0;
+            if (nums.length >= 2) minor = parseInt(nums[1]) || 0;
+            if (nums.length >= 3) patch = parseInt(nums[2]) || 0;
+
+            const nextPatch = `${major}.${minor}.${patch + 1}${suffix}`;
+            const nextMinor = `${major}.${minor + 1}.0${suffix}`;
+            const nextMajor = `${major + 1}.0.0${suffix}`;
+
             const versionType = await vscode.window.showQuickPick(
                 [
-                    { label: 'Patch (Default)', description: '0.0.X -> 0.0.X+1', type: '' },
-                    { label: 'Minor', description: '0.X.0', type: '--minor' },
-                    { label: 'Major', description: 'X.0.0', type: '--major' }
+                    { label: `Patch (Default) ${currentVersion} -> ${nextPatch}`, description: `Last saved: ${lastCommitVersion}`, type: '' },
+                    { label: `Minor ${currentVersion} -> ${nextMinor}`, description: `Last saved: ${lastCommitVersion}`, type: '--minor' },
+                    { label: `Major ${currentVersion} -> ${nextMajor}`, description: `Last saved: ${lastCommitVersion}`, type: '--major' },
+                    { label: 'Don\'t Increment', description: 'Keep current version', type: '--no-increment' },
+                    { label: 'Manual Version', description: 'Enter specific version', type: 'manual' }
                 ],
                 { placeHolder: 'Select version increment type' }
             );
 
-            const flag = versionType ? versionType.type : '';
-            const targetPath = repoPath || rootPath;
-            const args = flag ? [message, flag] : [message];
+            if (!versionType) return;
+
+            let flag = versionType.type;
+            let manualVer = '';
+
+            if (flag === 'manual') {
+                const v = await vscode.window.showInputBox({ placeHolder: 'Enter version (e.g. 1.2.3)' });
+                if (!v) return;
+                flag = '--set-version';
+                manualVer = v;
+            }
+
+            const args = [message];
+            if (flag) args.push(flag);
+            if (manualVer) args.push(manualVer);
+
             runBetterGitCommand('save', args, targetPath, providerPath(context), betterGitProvider);
         }
     });
@@ -292,6 +337,26 @@ async function refreshTreePreservingUiState(provider: BetterGitTreeProvider): Pr
     } finally {
         suppressTreeStateTracking = false;
     }
+}
+
+// Helper to run your C# EXE and get stdout
+function execBetterGit(args: string[], cwd: string, context: vscode.ExtensionContext): Promise<string> {
+    const config = vscode.workspace.getConfiguration('bettergit');
+    let exePath = config.get<string>('executablePath');
+
+    if (!exePath) {
+        return Promise.reject('BetterGit executable path not configured.');
+    }
+
+    return new Promise((resolve, reject) => {
+        cp.execFile(exePath!, args, { cwd: cwd }, (err, stdout, stderr) => {
+            if (err) {
+                reject(stderr || err.message);
+            } else {
+                resolve(stdout.trim());
+            }
+        });
+    });
 }
 
 // Helper to run your C# EXE
