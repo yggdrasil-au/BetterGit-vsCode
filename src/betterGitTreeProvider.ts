@@ -405,8 +405,10 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
                     const saveItem = new BetterGitItem("Save Changes", vscode.TreeItemCollapsibleState.None, 'action', '');
                     saveItem.command = { command: 'bettersourcecontrol.save', title: 'Save', arguments: [repoPath] };
-                    // standard floppy disk icon, always orange colour to indicate unsaved changes
-                    saveItem.iconPath = new vscode.ThemeIcon('save', new vscode.ThemeColor('charts.orange'));
+                    // Only tint Save when there are unsaved changes.
+                    saveItem.iconPath = hasActiveChanges
+                        ? new vscode.ThemeIcon('save', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'))
+                        : new vscode.ThemeIcon('save');
                     items.push(saveItem);
 
                     const undoItem = new BetterGitItem("Undo Last Save", vscode.TreeItemCollapsibleState.None, 'action', '');
@@ -425,9 +427,8 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     publishItem.command = { command: 'bettersourcecontrol.publish', title: 'Publish', arguments: [repoPath] };
                     // cloud upload icon; tint only when publish is pending (purple), or pending+changes (pink)
                     const publishTint = this.getPublishTintColor(hasActiveChanges, isPublishPending);
-                    publishItem.iconPath = publishTint
-                        ? new vscode.ThemeIcon('cloud-upload', publishTint)
-                        : new vscode.ThemeIcon('cloud-upload');
+                    // set icon with tint if applicable else default icon
+                    publishItem.iconPath = publishTint ? new vscode.ThemeIcon('cloud-upload', publishTint) : new vscode.ThemeIcon('cloud-upload');
                     items.push(publishItem);
 
                     const channelItem = new BetterGitItem("Set Release Channel", vscode.TreeItemCollapsibleState.None, 'action', '');

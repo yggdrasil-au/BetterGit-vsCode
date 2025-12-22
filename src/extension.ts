@@ -272,23 +272,33 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
     return new Promise<void>((resolve) => {
         cp.execFile(exePath, [command, ...args], { cwd: cwd }, (err, stdout, stderr) => {
             try {
+                // BetterGit may write warnings/errors to stderr even when it exits with code 0.
+                // Surface stderr so actions like Publish don't appear to do nothing.
+                const trimmedStdout = (stdout || '').trim();
+                const trimmedStderr = (stderr || '').trim();
+
+                if (trimmedStdout) {
+                    outputChannel.appendLine(`[OUTPUT] ${trimmedStdout}`);
+                    vscode.window.showInformationMessage(trimmedStdout);
+                }
+
                 if (err) {
-                    if (stderr) {
-                        outputChannel.appendLine(`[ERROR] ${stderr}`);
-                        vscode.window.showErrorMessage('BetterGit Error: ' + stderr);
+                    const detail = trimmedStderr || String(err);
+                    outputChannel.appendLine(`[ERROR] ${detail}`);
+                    vscode.window.showErrorMessage('BetterGit Error: ' + detail);
+                } else if (trimmedStderr) {
+                    // Exit code 0, but stderr has content.
+                    outputChannel.appendLine(`[WARN] ${trimmedStderr}`);
+                    if (trimmedStderr.toLowerCase().includes('failed') || trimmedStderr.toLowerCase().includes('error')) {
+                        vscode.window.showErrorMessage('BetterGit: ' + trimmedStderr);
                     } else {
-                        outputChannel.appendLine(`[ERROR] ${String(err)}`);
-                        vscode.window.showErrorMessage('BetterGit Error: ' + String(err));
+                        vscode.window.showWarningMessage('BetterGit: ' + trimmedStderr);
                     }
-                } else {
-                    if (stdout) {
-                        outputChannel.appendLine(`[OUTPUT] ${stdout}`);
-                        vscode.window.showInformationMessage(stdout);
-                    }
-                    provider.refresh(); // Update the tree view after action
-                    restoreExpandedState(provider);
                 }
             } finally {
+                // Always refresh after an attempted action so the UI reflects the latest state.
+                provider.refresh();
+                restoreExpandedState(provider);
                 resolve();
             }
         });
