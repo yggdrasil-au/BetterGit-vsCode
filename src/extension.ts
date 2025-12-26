@@ -176,6 +176,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 7. Register "Open Diff" Command
     vscode.commands.registerCommand('bettersourcecontrol.openDiff', (file: string, status: string, repoPath?: string) => {
+        if (!file) return;
         if (!rootPath) return;
 
         // We need to know which repo this file belongs to.
@@ -380,6 +381,11 @@ function execBetterGit(args: string[], cwd: string, context: vscode.ExtensionCon
         return Promise.reject('BetterGit executable path not configured.');
     }
 
+    // Sanitize exePath: remove surrounding quotes if present
+    if (exePath.startsWith('"') && exePath.endsWith('"')) {
+        exePath = exePath.substring(1, exePath.length - 1);
+    }
+
     return new Promise((resolve, reject) => {
         cp.execFile(exePath!, args, { cwd: cwd }, (err, stdout, stderr) => {
             if (err) {
@@ -405,6 +411,11 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
         outputChannel.appendLine(`[ERROR] BetterGit executable path is not configured. Please set "bettergit.executablePath" in settings.`);
         vscode.window.showErrorMessage('BetterGit executable path is not configured. Please set "bettergit.executablePath" in settings.');
         return Promise.resolve();
+    }
+
+    // Sanitize exePath: remove surrounding quotes if present
+    if (exePath.startsWith('"') && exePath.endsWith('"')) {
+        exePath = exePath.substring(1, exePath.length - 1);
     }
 
     // Log the command being executed

@@ -225,7 +225,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     }
 
     private async createRepoItemWithStatus(data: any): Promise<BetterGitItem> {
-        const absPath = path.join(this.workspaceRoot!, data.Path);
+        const absPath = path.join(this.workspaceRoot!, data.Path || '');
         try {
             const treeData = await this.getTreeData(absPath);
             const hasChanges = !!(treeData && treeData.isInitialized && Array.isArray(treeData.changes) && treeData.changes.length > 0);
@@ -298,6 +298,11 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 return;
             }
 
+            // Sanitize exePath: remove surrounding quotes if present
+            if (exePath.startsWith('"') && exePath.endsWith('"')) {
+                exePath = exePath.substring(1, exePath.length - 1);
+            }
+
             // Call scan-repos
             const workspaceRoot = this.workspaceRoot!;
             outputChannel.appendLine(`[INFO] Scanning repositories in ${workspaceRoot}`);
@@ -337,11 +342,16 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     private scanOtherModules(): Promise<any[]> {
         return new Promise(resolve => {
             const config = vscode.workspace.getConfiguration('bettergit');
-            const exePath = config.get<string>('executablePath');
+            let exePath = config.get<string>('executablePath');
             if (!exePath) {
                 outputChannel.appendLine('[ERROR] BetterGit executable path not configured');
                 resolve([]);
                 return;
+            }
+
+            // Sanitize exePath: remove surrounding quotes if present
+            if (exePath.startsWith('"') && exePath.endsWith('"')) {
+                exePath = exePath.substring(1, exePath.length - 1);
             }
 
             outputChannel.appendLine(`[INFO] Scanning other modules in ${this.workspaceRoot}`);
@@ -377,6 +387,11 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 outputChannel.appendLine('[ERROR] BetterGit executable path not configured');
                 resolve(null);
                 return;
+            }
+
+            // Sanitize exePath: remove surrounding quotes if present
+            if (exePath.startsWith('"') && exePath.endsWith('"')) {
+                exePath = exePath.substring(1, exePath.length - 1);
             }
 
             // Pass --path to get-tree-data
