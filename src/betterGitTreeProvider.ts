@@ -82,22 +82,6 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         return find(this.repoData);
     }
 
-    /**
-     * Returns the configured submodule paths represented by a repository status response.
-     */
-    public getChangedSubmodulePaths(repoPath: string, changes: unknown): string[] {
-        if (!Array.isArray(changes)) {
-            return [];
-        }
-
-        const paths = changes
-            .map(change => typeof change?.path === 'string' ? change.path : '')
-            .filter(changePath => changePath.length > 0 && this.isSubmoduleChange(repoPath, changePath))
-            .map(changePath => this.normalizeRelPath(changePath));
-
-        return [...new Set(paths)].sort((firstPath, secondPath) => firstPath.localeCompare(secondPath));
-    }
-
     public getSectionItem(repoPath: string, sectionContextValue: string): BetterGitItem | undefined {
         return this.sectionItemCache.get(this.sectionKey(repoPath, sectionContextValue));
     }
@@ -199,7 +183,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         }
 
         // Repo Section (children: Manage/Changes/Timeline/Archives + nested repos)
-        if (element.contextValue === 'repo-section') {
+        if (element.contextValue === 'repo-section' || element.contextValue === 'nested-repo') {
             const repoPath: string | undefined = element.data?.repoPath;
             const items: BetterGitItem[] = [];
 
@@ -275,7 +259,8 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
 
         try {
             const treeData = await this.getTreeData(absPath);
-            const changes = (treeData && treeData.isInitialized && Array.isArray(treeData.changes)) ? treeData.changes : [];
+            const rawChanges = (treeData && treeData.isInitialized && Array.isArray(treeData.changes)) ? treeData.changes : [];
+            const changes = await this.getVisibleChanges(absPath, rawChanges);
             hasDirectChanges = changes.length > 0;
 
             // Check if one of the changes IS a submodule (gitlink)
@@ -339,6 +324,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     ): BetterGitItem {
         const state = vscode.TreeItemCollapsibleState.Collapsed;
         const absPath = path.join(this.workspaceRoot!, data.Path);
+        const contextValue = (data.Type || '').toLowerCase() === 'nested' ? 'nested-repo' : 'repo-section';
 
         const key = this.normalizeAbsPath(absPath);
         const existing = this.repoItemCache.get(key);
@@ -348,10 +334,11 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
             existing.description = data.Path;
             existing.iconPath = this.getRepoIcon(hasActiveChanges, isPublishPending, hasSubmoduleInChanges, hasDirtyDescendants);
             existing.data = { ...data, repoPath: absPath };
+            existing.contextValue = contextValue;
             return existing;
         }
 
-        const item = new BetterGitItem(label, state, 'repo-section', '', undefined, {
+        const item = new BetterGitItem(label, state, contextValue, '', undefined, {
             ...data,
             repoPath: absPath
         });
@@ -375,7 +362,8 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         const absPath = path.join(this.workspaceRoot!, data.Path || '');
         try {
             const treeData = await this.getTreeData(absPath);
-            const changes = (treeData && treeData.isInitialized && Array.isArray(treeData.changes)) ? treeData.changes : [];
+            const rawChanges = (treeData && treeData.isInitialized && Array.isArray(treeData.changes)) ? treeData.changes : [];
+            const changes = await this.getVisibleChanges(absPath, rawChanges);
             const hasChanges = changes.length > 0;
             const hasSubmoduleChanges = changes.some((c: any) => this.isSubmoduleChange(absPath, c.path));
             const aheadBy = typeof treeData?.publish?.aheadBy === 'number' ? treeData.publish.aheadBy : 0;
@@ -596,7 +584,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     }
 
     private getDataFromCSharp(section: string | undefined, repoPath: string): Promise<BetterGitItem[]> {
-        return this.getTreeData(repoPath).then(data => {
+        return this.getTreeData(repoPath).then(async data => {
             if (!data) {
                 const detail = this.treeDataErrorCache.get(repoPath);
                 const items: BetterGitItem[] = [];
@@ -618,6 +606,8 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                 return [errorItem];
             }
             const items: BetterGitItem[] = [];
+            const rawChanges = Array.isArray(data.changes) ? data.changes : [];
+            const visibleChanges = await this.getVisibleChanges(repoPath, rawChanges);
 
             if (section === 'section-manage') {
                 if (!data.isInitialized) {
@@ -633,7 +623,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     initDenoItem.command = { command: 'bettersourcecontrol.initDeno', title: 'Initialize Deno', arguments: [repoPath] };
                     items.push(initDenoItem);
                 } else {
-                    const hasActiveChanges = Array.isArray(data.changes) && data.changes.length > 0;
+                    const hasActiveChanges = visibleChanges.length > 0;
                     const aheadBy = typeof data.publish?.aheadBy === 'number' ? data.publish.aheadBy : 0;
                     const isPublishPending = !!data.publish?.isPublishPending || aheadBy > 0;
 
@@ -671,7 +661,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     items.push(new BetterGitItem("Repository is not initialized", vscode.TreeItemCollapsibleState.None, 'info', ''));
                     return items;
                 }
-                data.changes.forEach((change: any) => {
+                visibleChanges.forEach((change: any) => {
                     const file = change.path;
                     const status = change.status;
 
@@ -752,7 +742,7 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     return items;
                 }
                 const aheadBy = typeof data.publish?.aheadBy === 'number' ? data.publish.aheadBy : 0;
-                const hasActiveChanges = Array.isArray(data.changes) && data.changes.length > 0;
+                const hasActiveChanges = visibleChanges.length > 0;
                 const isPublishPending = !!data.publish?.isPublishPending || aheadBy > 0;
                 data.timeline.forEach((commit: any, index: number) => {
                     const item = new BetterGitItem(`[${commit.version}] ${commit.message}`, vscode.TreeItemCollapsibleState.None, 'commit', commit.id, undefined, { repoPath });
@@ -883,9 +873,65 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         return set.has(this.normalizeRelPath(changeRelPath));
     }
 
+    private async getVisibleChanges(repoPath: string, changes: any[]): Promise<any[]> {
+        const childChanges = changes.filter(change => this.isChildRepositoryChange(repoPath, change?.path));
+        if (childChanges.length === 0) {
+            return changes;
+        }
+
+        const ordinaryChanges = changes.filter(change => !this.isChildRepositoryChange(repoPath, change?.path));
+        if (ordinaryChanges.length === 0) {
+            return [];
+        }
+
+        const childVisibility = await Promise.all(childChanges.map(async change => {
+            const childPath = path.join(repoPath, change.path);
+            return {
+                change,
+                isDirty: await this.isChildRepositoryDirty(childPath)
+            };
+        }));
+        const visibleChildPaths = new Set(childVisibility
+            .filter(result => result.isDirty)
+            .map(result => this.normalizeRelPath(result.change.path)));
+
+        return changes.filter(change => !this.isChildRepositoryChange(repoPath, change?.path)
+            || visibleChildPaths.has(this.normalizeRelPath(change.path)));
+    }
+
+    private isChildRepositoryChange(repoPath: string, changePath: unknown): boolean {
+        if (typeof changePath !== 'string' || changePath.length === 0) {
+            return false;
+        }
+
+        const targetPath = path.join(repoPath, changePath);
+        return this.isSubmoduleChange(repoPath, changePath) || this.pathIsGitRepository(targetPath);
+    }
+
+    private async isChildRepositoryDirty(childPath: string): Promise<boolean> {
+        const childTreeData = await this.getTreeData(childPath);
+        return !childTreeData
+            || !childTreeData.isInitialized
+            || !Array.isArray(childTreeData.changes)
+            || childTreeData.changes.length > 0;
+    }
+
     private pathIsDirectory(absPath: string): boolean {
         try {
             return fs.existsSync(absPath) && fs.statSync(absPath).isDirectory();
+        } catch {
+            return false;
+        }
+    }
+
+    private pathIsGitRepository(absPath: string): boolean {
+        if (!this.pathIsDirectory(absPath)) {
+            return false;
+        }
+
+        const gitPath = path.join(absPath, '.git');
+        try {
+            return fs.existsSync(gitPath);
         } catch {
             return false;
         }

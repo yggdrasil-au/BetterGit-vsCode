@@ -33,9 +33,13 @@ Use the inline branch action on a remote row to change the branch that mirror pu
 
 Selecting a directory or submodule change reveals its scanned repository node in the BetterGit view. If BetterGit cannot find that node, refresh the view and try again. Enable `bettergit.submoduleChanges.revealInExplorer` to also reveal the folder in your OS file explorer.
 
-## Saving Submodule Changes
+## Saving Child Repositories
 
-When a parent repository has changed configured submodules, BetterGit lists their paths before saving. Select **Save All** to commit the parent repository's ordinary changes, `.gitmodules` updates, and submodule gitlinks together. Select **Exclude Submodules** to leave those gitlinks uncommitted while saving the remaining parent changes. Cancel closes the save flow without changing the repository.
+When a parent repository has only child repository changes, BetterGit leaves them to their own repository nodes and does not create a parent commit. When a parent file also changes, BetterGit includes child repository references in the background. If that attempt fails, it retries the parent save without child repository references and records each step in the BetterGit output channel.
+
+Clean child repositories are hidden from the parent's Changes section. Dirty child repositories remain visible when the parent also has ordinary changes.
+
+Unregistered nested repositories have an inline **Convert to Submodule** action in Other Modules. BetterGit uses the child repository's `origin` URL when available, otherwise it asks for a URL. Git preserves the child working files and uncommitted changes during conversion.
 
 ## Development
 

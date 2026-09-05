@@ -72,7 +72,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (suppressTreeStateTracking) return;
         const el = e.element;
         const repoPath = el?.data?.repoPath as string | undefined;
-        if (el.contextValue === 'repo-section' && repoPath) {
+        if ((el.contextValue === 'repo-section' || el.contextValue === 'nested-repo') && repoPath) {
             expandedRepoPaths.add(normalizeAbsPath(repoPath));
         }
         if (el.contextValue?.startsWith('section-') && repoPath) {
@@ -84,7 +84,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (suppressTreeStateTracking) return;
         const el = e.element;
         const repoPath = el?.data?.repoPath as string | undefined;
-        if (el.contextValue === 'repo-section' && repoPath) {
+        if ((el.contextValue === 'repo-section' || el.contextValue === 'nested-repo') && repoPath) {
             expandedRepoPaths.delete(normalizeAbsPath(repoPath));
         }
         if (el.contextValue?.startsWith('section-') && repoPath) {
@@ -129,32 +129,6 @@ export function activate(context: vscode.ExtensionContext) {
             const message = inputBox.value;
             inputBox.hide();
             if (message === undefined) return;
-
-            let excludedSubmodulePaths: string[] = [];
-            try {
-                const output = await execBetterGit(['get-tree-data'], targetPath, context);
-                const treeData = JSON.parse(output);
-                const submodulePaths = betterGitProvider.getChangedSubmodulePaths(targetPath, treeData?.changes);
-
-                if (submodulePaths.length > 0) {
-                    const selection = await vscode.window.showWarningMessage(
-                        `${submodulePaths.length} configured submodule change${submodulePaths.length === 1 ? '' : 's'} will be included:\n${submodulePaths.join('\n')}`,
-                        { modal: true },
-                        'Save All',
-                        'Exclude Submodules'
-                    );
-
-                    if (!selection) {
-                        return;
-                    }
-
-                    if (selection === 'Exclude Submodules') {
-                        excludedSubmodulePaths = submodulePaths;
-                    }
-                }
-            } catch (error) {
-                outputChannel.appendLine(`[WARN] Could not determine changed submodules before saving: ${error}`);
-            }
 
             // Get version info
             let currentVersion = '0.0.0';
@@ -209,9 +183,6 @@ export function activate(context: vscode.ExtensionContext) {
             const args = [message];
             if (flag) args.push(flag);
             if (manualVer) args.push(manualVer);
-            for (const submodulePath of excludedSubmodulePaths) {
-                args.push('--exclude-path', submodulePath);
-            }
 
             runBetterGitCommand('save', args, targetPath, providerPath(context), betterGitProvider);
         });
@@ -590,6 +561,44 @@ export function activate(context: vscode.ExtensionContext) {
         await runBetterGitCommand('remote', ['add', remoteName, remoteUrl, '--group', group || 'Mirrors', '--branch', branch], repoPath, providerPath(context), betterGitProvider);
     });
 
+    vscode.commands.registerCommand('bettersourcecontrol.convertNestedRepoToSubmodule', async (item: BetterGitItem) => {
+        const childRepoPath = item?.data?.repoPath as string | undefined;
+        if (!childRepoPath || !rootPath) return;
+
+        const relativePath = path.relative(rootPath, childRepoPath).replace(/\\/g, '/');
+        if (!relativePath || relativePath.startsWith('../')) {
+            vscode.window.showErrorMessage('BetterGit can only convert repositories inside the current workspace root.');
+            return;
+        }
+
+        let remoteUrl = '';
+        try {
+            const remotes = JSON.parse(await execBetterGit(['remote', 'list', '--json'], childRepoPath, context));
+            const origin = Array.isArray(remotes) ? remotes.find(remote => remote?.name === 'origin') : undefined;
+            remoteUrl = String(origin?.fetchUrl || origin?.pushUrl || '');
+        } catch (error) {
+            outputChannel.appendLine(`[WARN] Could not read the nested repository origin: ${error}`);
+        }
+
+        if (!remoteUrl) {
+            const enteredUrl = await vscode.window.showInputBox({
+                prompt: `Enter the remote URL for submodule '${relativePath}'`,
+                placeHolder: 'https://... or git@...'
+            });
+            if (!enteredUrl) return;
+            remoteUrl = enteredUrl;
+        }
+
+        const confirmation = await vscode.window.showWarningMessage(
+            `Convert '${relativePath}' into a submodule using ${remoteUrl}? Its working files and uncommitted changes will be preserved.`,
+            { modal: true },
+            'Convert'
+        );
+        if (confirmation !== 'Convert') return;
+
+        await runBetterGitCommand('convert-to-submodule', [relativePath, remoteUrl], rootPath, providerPath(context), betterGitProvider);
+    });
+
     // --- ADD SAFE DIRECTORY ---
     vscode.commands.registerCommand('bettersourcecontrol.addSafeDirectory', async (repoPath: string) => {
         if (!repoPath) return;
@@ -622,7 +631,7 @@ async function refreshTreePreservingUiState(provider: BetterGitTreeProvider): Pr
 
         // Best-effort: keep selection stable across refresh.
         if (selectedRepoPath && selectedContext) {
-            if (selectedContext === 'repo-section') {
+            if (selectedContext === 'repo-section' || selectedContext === 'nested-repo') {
                 const repoItem = provider.getRepoItemByRepoPath(selectedRepoPath);
                 if (repoItem) {
                     await betterGitTreeView.reveal(repoItem, { expand: false, select: true, focus: false });
@@ -696,9 +705,16 @@ function runBetterGitCommand(command: string, args: string[], cwd: string | unde
                 const trimmedStdout = (stdout || '').trim();
                 const trimmedStderr = (stderr || '').trim();
 
-                if (trimmedStdout) {
-                    outputChannel.appendLine(`[OUTPUT] ${trimmedStdout}`);
-                    vscode.window.showInformationMessage(trimmedStdout);
+                const userOutputLines = trimmedStdout.split(/\r?\n/).filter(line => line.length > 0 && !line.startsWith('[INFO]'));
+                const infoOutputLines = trimmedStdout.split(/\r?\n/).filter(line => line.startsWith('[INFO]'));
+                for (const infoLine of infoOutputLines) {
+                    outputChannel.appendLine(infoLine);
+                }
+
+                if (userOutputLines.length > 0) {
+                    const userOutput = userOutputLines.join('\n');
+                    outputChannel.appendLine(`[OUTPUT] ${userOutput}`);
+                    vscode.window.showInformationMessage(userOutput);
                 }
 
                 if (err) {
