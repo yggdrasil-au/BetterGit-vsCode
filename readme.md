@@ -29,6 +29,14 @@ Use the inline `+` action on the **Remotes** section to create a new mirror remo
 
 Use the inline branch action on a remote row to change the branch that mirror publishes to.
 
+## Directory And Submodule Changes
+
+Selecting a directory or submodule change reveals its scanned repository node in the BetterGit view. If BetterGit cannot find that node, refresh the view and try again. Enable `bettergit.submoduleChanges.revealInExplorer` to also reveal the folder in your OS file explorer.
+
+## Saving Submodule Changes
+
+When a parent repository has changed configured submodules, BetterGit lists their paths before saving. Select **Save All** to commit the parent repository's ordinary changes, `.gitmodules` updates, and submodule gitlinks together. Select **Exclude Submodules** to leave those gitlinks uncommitted while saving the remaining parent changes. Cancel closes the save flow without changing the repository.
+
 ## Development
 
 1.  Install dependencies:

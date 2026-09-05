@@ -49,6 +49,55 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
         return this.repoItemCache.get(this.normalizeAbsPath(repoPath));
     }
 
+    /**
+     * Finds a scanned repository item for a directory change, materializing its stable tree item when necessary.
+     */
+    public resolveRepoItemByRepoPath(repoPath: string): BetterGitItem | undefined {
+        const cached = this.getRepoItemByRepoPath(repoPath);
+        if (cached || !this.repoData || !this.workspaceRoot) {
+            return cached;
+        }
+
+        const targetKey = this.normalizeAbsPath(repoPath);
+        const find = (node: any): BetterGitItem | undefined => {
+            const nodePath = path.join(this.workspaceRoot!, node.Path || '');
+            if (this.normalizeAbsPath(nodePath) === targetKey) {
+                return this.createRepoItem(node, false, false);
+            }
+
+            if (!Array.isArray(node.Children)) {
+                return undefined;
+            }
+
+            for (const child of node.Children) {
+                const match = find(child);
+                if (match) {
+                    return match;
+                }
+            }
+
+            return undefined;
+        };
+
+        return find(this.repoData);
+    }
+
+    /**
+     * Returns the configured submodule paths represented by a repository status response.
+     */
+    public getChangedSubmodulePaths(repoPath: string, changes: unknown): string[] {
+        if (!Array.isArray(changes)) {
+            return [];
+        }
+
+        const paths = changes
+            .map(change => typeof change?.path === 'string' ? change.path : '')
+            .filter(changePath => changePath.length > 0 && this.isSubmoduleChange(repoPath, changePath))
+            .map(changePath => this.normalizeRelPath(changePath));
+
+        return [...new Set(paths)].sort((firstPath, secondPath) => firstPath.localeCompare(secondPath));
+    }
+
     public getSectionItem(repoPath: string, sectionContextValue: string): BetterGitItem | undefined {
         return this.sectionItemCache.get(this.sectionKey(repoPath, sectionContextValue));
     }
@@ -770,7 +819,12 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
     }
 
     private normalizeAbsPath(p: string): string {
-        return path.normalize(p).toLowerCase();
+        const normalized = path.normalize(p);
+        const parsed = path.parse(normalized);
+        const withoutTrailingSeparator = normalized === parsed.root
+            ? normalized
+            : normalized.replace(/[\\/]+$/, '');
+        return withoutTrailingSeparator.toLowerCase();
     }
 
     private normalizeRelPath(p: string): string {

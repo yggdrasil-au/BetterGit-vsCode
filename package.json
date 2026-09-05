@@ -2,10 +2,10 @@
     "name": "bettergitvscode",
     "displayName": "BetterGitVSCode",
     "description": "Simplified, non-destructive version control.",
-    "version": "0.4.15",
+    "version": "0.5.0",
     "type": "module",
     "engines": {
-        "vscode": "^1.110.0"
+        "vscode": "^1.136.0"
     },
     "extensionDependencies": [
         "github.copilot-chat"
@@ -198,9 +198,9 @@
     },
     "devDependencies": {
         "vscode": "^1.1.37",
-        "@vscode/vsce": "3.7.1",
-        "typescript": "6.0.2",
-        "@types/node": "25.6.0",
-        "@types/vscode": "^1.110.0"
+        "@vscode/vsce": "3.9.2",
+        "typescript": "6.0.3",
+        "@types/node": "26.4.1",
+        "@types/vscode": "^1.136.0"
     }
 }

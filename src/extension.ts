@@ -130,6 +130,32 @@ export function activate(context: vscode.ExtensionContext) {
             inputBox.hide();
             if (message === undefined) return;
 
+            let excludedSubmodulePaths: string[] = [];
+            try {
+                const output = await execBetterGit(['get-tree-data'], targetPath, context);
+                const treeData = JSON.parse(output);
+                const submodulePaths = betterGitProvider.getChangedSubmodulePaths(targetPath, treeData?.changes);
+
+                if (submodulePaths.length > 0) {
+                    const selection = await vscode.window.showWarningMessage(
+                        `${submodulePaths.length} configured submodule change${submodulePaths.length === 1 ? '' : 's'} will be included:\n${submodulePaths.join('\n')}`,
+                        { modal: true },
+                        'Save All',
+                        'Exclude Submodules'
+                    );
+
+                    if (!selection) {
+                        return;
+                    }
+
+                    if (selection === 'Exclude Submodules') {
+                        excludedSubmodulePaths = submodulePaths;
+                    }
+                }
+            } catch (error) {
+                outputChannel.appendLine(`[WARN] Could not determine changed submodules before saving: ${error}`);
+            }
+
             // Get version info
             let currentVersion = '0.0.0';
             let lastCommitVersion = 'None';
@@ -183,6 +209,9 @@ export function activate(context: vscode.ExtensionContext) {
             const args = [message];
             if (flag) args.push(flag);
             if (manualVer) args.push(manualVer);
+            for (const submodulePath of excludedSubmodulePaths) {
+                args.push('--exclude-path', submodulePath);
+            }
 
             runBetterGitCommand('save', args, targetPath, providerPath(context), betterGitProvider);
         });
@@ -319,13 +348,12 @@ export function activate(context: vscode.ExtensionContext) {
         const revealInExplorer = config.get<boolean>('submoduleChanges.revealInExplorer', false);
 
         if (openRepoNode && betterGitTreeView) {
-            const repoItem = betterGitProvider.getRepoItemByRepoPath(targetAbsPath);
+            const repoItem = betterGitProvider.resolveRepoItemByRepoPath(targetAbsPath);
             if (repoItem) {
                 await betterGitTreeView.reveal(repoItem, { expand: 2, focus: true, select: true });
             } else {
-                // If we can't find the node (not scanned / not in tree), fall back to explorer if enabled.
                 if (!revealInExplorer) {
-                    vscode.window.showInformationMessage('Submodule repo node not found in BetterGit view.');
+                    vscode.window.showWarningMessage(`BetterGit could not find a scanned repository node for ${targetAbsPath}. Refresh BetterGit and try again.`);
                 }
             }
         }
