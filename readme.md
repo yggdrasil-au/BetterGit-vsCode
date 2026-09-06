@@ -41,6 +41,10 @@ Clean child repositories are hidden from the parent's Changes section. Dirty chi
 
 Unregistered nested repositories have an inline **Convert to Submodule** action in Other Modules. BetterGit uses the child repository's `origin` URL when available, otherwise it asks for a URL. Git preserves the child working files and uncommitted changes during conversion.
 
+## First Publish
+
+When a repository has local commits and one or more remotes but no tracked upstream branch, **Publish** is highlighted. Selecting it asks which remote should become the current branch's upstream, then performs a normal non-forced first push. Existing tracked branches publish directly.
+
 ## Development
 
 1.  Install dependencies:

@@ -742,8 +742,6 @@ export class BetterGitTreeProvider implements vscode.TreeDataProvider<BetterGitI
                     return items;
                 }
                 const aheadBy = typeof data.publish?.aheadBy === 'number' ? data.publish.aheadBy : 0;
-                const hasActiveChanges = visibleChanges.length > 0;
-                const isPublishPending = !!data.publish?.isPublishPending || aheadBy > 0;
                 data.timeline.forEach((commit: any, index: number) => {
                     const item = new BetterGitItem(`[${commit.version}] ${commit.message}`, vscode.TreeItemCollapsibleState.None, 'commit', commit.id, undefined, { repoPath });
 

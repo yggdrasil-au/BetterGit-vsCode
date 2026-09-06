@@ -365,13 +365,37 @@ export function activate(context: vscode.ExtensionContext) {
         const targetPath = repoPath || rootPath;
         if (!targetPath) return;
 
+        let publishArguments: string[] = [];
+        try {
+            const treeData = JSON.parse(await execBetterGit(['get-tree-data'], targetPath, context));
+            if (treeData?.publish?.requiresUpstream) {
+                const remotes: Array<{ name?: unknown; hasGitRemote?: unknown; pushUrl?: unknown; fetchUrl?: unknown }> = Array.isArray(treeData.remotes)
+                    ? treeData.remotes
+                    : [];
+                const remoteItems: vscode.QuickPickItem[] = remotes
+                    .filter(remote => remote.hasGitRemote)
+                    .map(remote => ({
+                        label: String(remote.name),
+                        description: String(remote.pushUrl || remote.fetchUrl || '')
+                    }));
+                const selectedRemote = await vscode.window.showQuickPick(
+                    remoteItems,
+                    { placeHolder: 'Select the remote to publish to and track' }
+                );
+                if (!selectedRemote) return;
+                publishArguments = ['--set-upstream', selectedRemote.label];
+            }
+        } catch (error) {
+            outputChannel.appendLine(`[WARN] Could not determine whether this is the first publish: ${error}`);
+        }
+
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
                 title: 'Publishing to all remotes...'
             },
             async () => {
-                await runBetterGitCommandStreaming('publish', [], targetPath, providerPath(context), betterGitProvider);
+                await runBetterGitCommandStreaming('publish', publishArguments, targetPath, providerPath(context), betterGitProvider);
             }
         );
     });
